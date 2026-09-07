@@ -1,0 +1,71 @@
+{
+  "host": {
+    "name": "Rhino3D",
+    "version": "8.34.26223+11002",
+    "os": "macOS",
+    "arch": "arm64"
+  },
+  "id": "6f3a0f4e-2f4a-4b1a-9d5e-8c1a2b3c4d5e",
+  "identity": {
+    "name": "gisloader",
+    "version": "0.1.10",
+    "publisher": {
+      "email": "hello@alexander-pfeiffer.de",
+      "name": "Alexander Pfeiffer",
+      "company": "Dipl.-Ing. Alexander Pfeiffer Architekt",
+      "address": "Schlossstraße 24, 52066 Aachen",
+      "country": "Deutschland",
+      "url": "https://gisloader.ampsrvr.xyz"
+    },
+    "description": "gisloader: 3D-Kontextmodelle aus offenen Geodaten direkt nach Rhino holen, mit Georeferenz und lokaler Brücke zur Web-App.",
+    "copyright": "Copyright © 2026 Alexander Pfeiffer",
+    "license": "MIT",
+    "url": "https://github.com/pipedreams-zz/gisloader-plugins"
+  },
+  "settings": {
+    "buildPath": "build/",
+    "buildTarget": {
+      "host": {
+        "name": "Rhino3D",
+        "version": "8"
+      },
+      "title": "Rhino3D (8.*)",
+      "slug": "rh8"
+    },
+    "publishTarget": {
+      "title": "McNeel Yak Server"
+    }
+  },
+  "codes": [
+    {
+      "id": "9c4f1c2a-7d3e-4e8b-a1f0-5b6c7d8e9f01",
+      "language": {
+        "id": "*.*.python",
+        "version": "3.*.*"
+      },
+      "title": "gisloader",
+      "uri": "commands/gisloader.py"
+    },
+    {
+      "id": "d2e7b5a1-3c4d-4f6a-b8c9-0a1b2c3d4e5f",
+      "language": {
+        "id": "*.*.python",
+        "version": "3.*.*"
+      },
+      "title": "gisloaderBridge",
+      "uri": "commands/gisloaderBridge.py"
+    }
+  ],
+  "libraries": [
+    {
+      "type": "uri",
+      "library": {
+        "base": "lib/gisloader_rhino/",
+        "language": {
+          "id": "*.*.python",
+          "version": "3.*.*"
+        }
+      }
+    }
+  ]
+}

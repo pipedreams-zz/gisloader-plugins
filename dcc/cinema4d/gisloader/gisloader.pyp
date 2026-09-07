@@ -42,7 +42,7 @@ class GisloaderDialog(gui.GeDialog):
         self.exports = []
 
     def CreateLayout(self):
-        self.SetTitle("gisloader")
+        self.SetTitle(f"gisloader {core.VERSION}")
         self.GroupBegin(2000, c4d.BFH_SCALEFIT, cols=2, rows=3)
         self.GroupBorderSpace(8, 8, 8, 4)
         self.AddStaticText(0, c4d.BFH_LEFT, name="Server")

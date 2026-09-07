@@ -6,5 +6,6 @@ mkdir -p dist
 rm -f dist/*.zip
 (cd dcc/blender && zip -qr ../../dist/gisloader-blender.zip gisloader_blender -x '*/__pycache__/*')
 (cd dcc/cinema4d && zip -qr ../../dist/gisloader-cinema4d.zip gisloader -x '*/__pycache__/*')
-(cd dcc/rhino && zip -qr ../../dist/gisloader-rhino.zip gisloader -x '*/__pycache__/*')
+(cd dcc && zip -qr ../dist/gisloader-rhino.zip rhino -x '*/__pycache__/*' 'rhino/build/*' 'rhino/gisloader.rhproj')
+cp dcc/rhino/dist/*.yak dist/ 2>/dev/null || true
 ls -l dist

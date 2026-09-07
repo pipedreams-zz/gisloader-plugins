@@ -7,19 +7,28 @@ EarthAnchorPoint.
 
 ## Installation
 
-1. Zip laden: auf der [Plugin-Seite](/plugins) der Web-App oder direkt
-   `https://<server>/dcc/gisloader-rhino.zip`.
-2. Entpacken, den Ordner `gisloader` an einen festen Ort legen, etwa
-   `~/Documents/gisloader-rhino/` (macOS) oder `%USERPROFILE%\Documents\gisloader-rhino\`
-   (Windows).
-3. In Rhino einmal ausführen: `_-RunPythonScript "<Pfad>/gisloader/gisloader.py"`.
-   Praktisch als Alias (Optionen › Aliase, z. B. `gisloader` →
-   `! _-RunPythonScript "<Pfad>/gisloader/gisloader.py"`) oder als
-   Werkzeugknopf mit demselben Makro.
-4. Soll die Brücke schon beim Start laufen: Optionen › Allgemein ›
-   „Befehle beim Start ausführen“ dieselbe Zeile eintragen.
+Das Plugin gibt es als Rhino-Paket (`.yak`) mit den Befehlen `gisloader`
+(Fenster öffnen) und `gisloaderBridge` (nur die Brücke starten).
 
-Ein Update ersetzt nur die Datei `gisloader.py`.
+1. Zip laden: auf der [Plugin-Seite](/plugins) der Web-App oder direkt
+   `https://<server>/dcc/gisloader-rhino.zip`. Darin liegt unter `dist/` die
+   Paketdatei `gisloader-<version>-rh8-any.yak`.
+2. Installieren: die `.yak`-Datei in das Rhino-Fenster ziehen, oder
+   `_PackageManager` öffnen und die Datei wählen, oder im Terminal
+   `"/Applications/Rhino 8.app/Contents/Resources/bin/yak" install <Datei>.yak`
+   (Windows: `"C:\Program Files\Rhino 8\System\Yak.exe" install <Datei>.yak`).
+   Rhino neu starten.
+3. Befehl `gisloader` eingeben. Für die Brücke ab Start: Optionen › Allgemein ›
+   „Befehle beim Start ausführen“ → `_gisloaderBridge`.
+
+Ohne Paket geht es weiterhin als Skript: `_-RunPythonScript
+"<Pfad>/gisloader-rhino/gisloader/gisloader.py"` (lädt die Bibliothek aus
+`lib/` daneben).
+
+Das Paket entsteht aus dem Skriptprojekt `gisloader.rhproj` mit
+`rhinocode project build`; dieselbe Datei lässt sich mit `yak push` auf den
+McNeel-Paketserver stellen (dann erscheint es im Package Manager) und bei
+food4Rhino als App hochladen.
 
 ## Benutzung
 
@@ -41,9 +50,9 @@ Ein Update ersetzt nur die Datei `gisloader.py`.
 ## Georeferenz
 
 - Rhino ist Z-up und dreht glTF (Y-up) beim Import: X = Ost, Y = Nord,
-  Z = Höhe, Einheit Meter. Ein leeres Dokument stellt das Skript vor dem
-  Import auf Meter; ein Dokument mit Inhalt behält seine Einheit, Rhino
-  rechnet beim Import um.
+  Z = Höhe. Die GLB ist in Metern; Rhino rechnet beim Import in die
+  Dokumenteinheit um (in einem Zentimeter-Dokument also Faktor 100, geprüft).
+  Die Ursprungswerte in den Dokumenttexten bleiben Meter.
 - Ursprung und CRS stehen als Dokumenttexte (`gisloader:crs`,
   `gisloader:origin_x/y/z`, `_DocumentText` oder `_-DocumentText`), bei
   UTM-Systemen (EPSG:25832, 25833) zusätzlich als EarthAnchorPoint mit

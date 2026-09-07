@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "gisloader_blender"
-version = "0.1.9"
+version = "0.1.10"
 name = "gisloader"
 tagline = "Exporte von gisloader abholen und mit Georeferenz importieren"
 maintainer = "gisloader"

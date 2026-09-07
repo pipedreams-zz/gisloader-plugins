@@ -1,0 +1,10 @@
+---
+name: gisloader
+version: 0.1.10+1463
+authors:
+- Alexander Pfeiffer
+description: 'gisloader: 3D-Kontextmodelle aus offenen Geodaten direkt nach Rhino holen, mit Georeferenz und lokaler Brücke zur Web-App.'
+license: MIT
+url: https://github.com/pipedreams-zz/gisloader-plugins
+keywords:
+- guid:6f3a0f4e-2f4a-4b1a-9d5e-8c1a2b3c4d5e

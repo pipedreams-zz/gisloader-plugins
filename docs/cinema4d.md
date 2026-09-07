@@ -50,5 +50,6 @@ neu starten.
   (macOS `/etc/ssl/cert.pem`, Linux `ca-certificates`; Windows liest den
   Zertifikatspeicher des Systems). Erscheint der Fehler weiterhin, fehlt auf
   dem Rechner das Systembündel.
-- Die Plugin-IDs stammen aus dem Testbereich von Maxon. Für eine Weitergabe
-  außerhalb des Hauses eigene IDs unter plugincafe.maxon.net registrieren.
+- Plugin-ID 1070158 (registriert bei plugincafe.maxon.net). Das Brücken-Plugin
+  (MessageData) nutzt noch die Test-ID 1000008; für die Weitergabe eine zweite
+  ID registrieren und in `gisloader.pyp` als `BRIDGE_EVENT_ID` eintragen.

@@ -13,8 +13,9 @@ from c4d import gui, plugins
 sys.path.insert(0, os.path.dirname(__file__))
 import gisloader_core as core  # noqa: E402
 
-# IDs aus dem Testbereich 1000001–1000010; für eine Veröffentlichung eigene IDs bei plugincafe.maxon.net holen.
-PLUGIN_ID = 1000007
+# Plugin-ID von plugincafe.maxon.net (registriert 7. September 2026). Die Brücke braucht eine
+# zweite ID für ihr MessageData-Plugin; bis dahin eine aus dem Testbereich 1000001–1000010.
+PLUGIN_ID = 1070158
 BRIDGE_EVENT_ID = 1000008
 
 ID_SERVER = 1001

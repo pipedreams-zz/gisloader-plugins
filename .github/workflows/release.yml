@@ -22,5 +22,5 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             --title "gisloader-Plugins $GITHUB_REF_NAME" \
-            --notes "Blender (dcc/blender) und Cinema 4D (dcc/cinema4d). Anleitungen unter docs/." \
-            dist/gisloader-blender.zip dist/gisloader-cinema4d.zip
+            --notes "Blender (dcc/blender), Cinema 4D (dcc/cinema4d) und Rhino 8 (dcc/rhino). Anleitungen unter docs/." \
+            dist/gisloader-blender.zip dist/gisloader-cinema4d.zip dist/gisloader-rhino.zip

@@ -31,7 +31,7 @@ try:
 except ImportError:  # pragma: no cover – alte Versionen ohne Node-API
     maxon = None
 
-VERSION = "0.1.7"
+VERSION = "0.1.8"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Cinema 4D nimmt den ersten freien Port ab 47810 (bis +9); Blender liegt ab 47800.
 BRIDGE_PORT = 47810

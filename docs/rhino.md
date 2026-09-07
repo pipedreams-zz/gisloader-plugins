@@ -41,7 +41,9 @@ Ein Update ersetzt nur die Datei `gisloader.py`.
 ## Georeferenz
 
 - Rhino ist Z-up und dreht glTF (Y-up) beim Import: X = Ost, Y = Nord,
-  Z = Höhe, Einheit Meter (Dokument in Metern anlegen).
+  Z = Höhe, Einheit Meter. Ein leeres Dokument stellt das Skript vor dem
+  Import auf Meter; ein Dokument mit Inhalt behält seine Einheit, Rhino
+  rechnet beim Import um.
 - Ursprung und CRS stehen als Dokumenttexte (`gisloader:crs`,
   `gisloader:origin_x/y/z`, `_DocumentText` oder `_-DocumentText`), bei
   UTM-Systemen (EPSG:25832, 25833) zusätzlich als EarthAnchorPoint mit

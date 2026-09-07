@@ -33,7 +33,7 @@ import System
 import Eto.Drawing as drawing
 import Eto.Forms as forms
 
-VERSION = "0.1.7"
+VERSION = "0.1.8"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Rhino nimmt den ersten freien Port ab 47820 (bis +9); Blender ab 47800, Cinema 4D ab 47810.
 BRIDGE_PORT = 47820
@@ -48,7 +48,7 @@ def state():
     """Sitzungszustand (Brücke, Warteschlange, Fenster) überlebt erneute Skriptläufe."""
     st = sc.sticky.get(STICKY)
     if st is None:
-        st = {"bridge": None, "thread": None, "port": 0, "queue": queue.Queue(), "form": None, "ssl": None}
+        st = {"bridge": None, "thread": None, "port": 0, "queue": queue.Queue(), "form": None, "ssl": None, "last": None}
         sc.sticky[STICKY] = st
     return st
 
@@ -335,6 +335,9 @@ def import_export(doc, p, export_id, folder=None):
     ids_before = {o.Id for o in doc.Objects}
     layers_before = {l.Id for l in doc.Layers}
     mats_before = doc.Materials.Count
+    # Leeres Dokument: auf Meter stellen, damit Koordinaten und Ursprung den Geodaten entsprechen.
+    if not ids_before and doc.ModelUnitSystem != Rhino.UnitSystem.Meters:
+        doc.AdjustModelUnitSystem(Rhino.UnitSystem.Meters, False)
     for g in glbs:
         if not doc.Import(os.path.join(folder, g)):
             raise RuntimeError(f"Import von {g} fehlgeschlagen")
@@ -388,6 +391,22 @@ def import_export(doc, p, export_id, folder=None):
             ea.Description = f"EPSG:{epsg} Ursprung {ox:.2f} / {oy:.2f}"
             doc.EarthAnchorPoint = ea
     doc.Views.Redraw()
+    # Zusammenfassung für /ping (Fehlersuche ohne Blick in Rhino).
+    anchor = doc.EarthAnchorPoint
+    state()["last"] = {
+        "name": name,
+        "objects": len(new_objs),
+        "layers": [l.Name for l in new_layers],
+        "relinked": relinked,
+        "folder": folder,
+        "units": str(doc.ModelUnitSystem),
+        "materials": [
+            {"name": doc.Materials[i].Name, "texture": (doc.Materials[i].GetBitmapTexture().FileName if doc.Materials[i].GetBitmapTexture() else None)}
+            for i in range(mats_before, doc.Materials.Count)
+            if doc.Materials[i] is not None and not doc.Materials[i].IsDeleted
+        ],
+        "anchor": {"lat": anchor.EarthBasepointLatitude, "lon": anchor.EarthBasepointLongitude} if anchor.EarthLocationIsSet() else None,
+    }
     return name, len(new_objs), relinked, folder
 
 
@@ -417,7 +436,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/ping"):
-            self._json(200, {"app": "rhino", "version": str(Rhino.RhinoApp.Version), "addon": VERSION, "port": state()["port"]})
+            self._json(200, {"app": "rhino", "version": str(Rhino.RhinoApp.Version), "addon": VERSION, "port": state()["port"], "last": state()["last"]})
         else:
             self._json(404, {"error": "unbekannt"})
 

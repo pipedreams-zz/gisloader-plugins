@@ -35,6 +35,20 @@ alte Fassung. Danach Blender neu starten, damit die Brücke sauber neu bindet.
   Port, die Web-App bietet je Instanz einen eigenen Knopf mit Versionsnummer.
 - „gisloader im Browser“ öffnet die Web-App mit dem eingestellten Server.
 
+## Speicherordner und Texturen
+
+- In den Add-on-Einstellungen steht der Speicherordner (Vorgabe
+  `~/Downloads/gisloader`). Jeder Export bekommt darin einen Unterordner
+  `<Ort>_<ID>` mit GLB, Texturen (JPEG), Provenienz und README.
+- „Beim Import nach dem Ordner fragen“ (Vorgabe an) öffnet vor jedem Import,
+  auch über die Brücke, einen Ordnerdialog, vorbelegt mit dem Speicherordner.
+  Ohne Häkchen landet alles direkt im Speicherordner. Lässt sich der Ordner
+  nicht anlegen, weicht das Add-on auf `~/Downloads/gisloader` aus.
+- Eingebettete Texturen der GLB werden nach dem Import als Dateien unter
+  `tex/` im Exportordner abgelegt und absolut verknüpft, damit sie beim
+  Speichern der Blend-Datei und in Renderfarmen als Dateien vorliegen; der
+  Pfad steht auch in `gisloader_folder` an der Collection.
+
 ## Georeferenz
 
 - GLB ist Y-up, Blender dreht beim Import nach Z-up: X = Ost, Y = Nord, Z = Höhe.

@@ -13,10 +13,9 @@ from c4d import gui, plugins
 sys.path.insert(0, os.path.dirname(__file__))
 import gisloader_core as core  # noqa: E402
 
-# Plugin-ID von plugincafe.maxon.net (registriert 7. September 2026). Die Brücke braucht eine
-# zweite ID für ihr MessageData-Plugin; bis dahin eine aus dem Testbereich 1000001–1000010.
+# Plugin-IDs von plugincafe.maxon.net (registriert 7. September 2026): Dialog und Brücke (MessageData).
 PLUGIN_ID = 1070158
-BRIDGE_EVENT_ID = 1000008
+BRIDGE_EVENT_ID = 1070160
 
 ID_SERVER = 1001
 ID_EMAIL = 1002
@@ -30,6 +29,9 @@ ID_STATUS = 1009
 ID_WEB = 1010
 ID_BRIDGE = 1011
 ID_PERIOD = 1012
+ID_FOLDER = 1013
+ID_FOLDER_PICK = 1014
+ID_ASK_FOLDER = 1015
 
 
 class GisloaderDialog(gui.GeDialog):
@@ -64,6 +66,13 @@ class GisloaderDialog(gui.GeDialog):
         self.AddComboBox(ID_LIST, c4d.BFH_SCALEFIT, initw=320)
         self.AddButton(ID_IMPORT, c4d.BFH_RIGHT, name="Importieren")
         self.GroupEnd()
+        self.GroupBegin(2004, c4d.BFH_SCALEFIT, cols=4)
+        self.GroupBorderSpace(8, 0, 8, 4)
+        self.AddStaticText(0, c4d.BFH_LEFT, name="Ordner")
+        self.AddEditText(ID_FOLDER, c4d.BFH_SCALEFIT, initw=320)
+        self.AddButton(ID_FOLDER_PICK, c4d.BFH_RIGHT, name="…")
+        self.AddCheckbox(ID_ASK_FOLDER, c4d.BFH_LEFT, initw=0, inith=0, name="Beim Import fragen")
+        self.GroupEnd()
         self.GroupBegin(2003, c4d.BFH_SCALEFIT, cols=2)
         self.GroupBorderSpace(8, 0, 8, 8)
         self.AddCheckbox(ID_BRIDGE, c4d.BFH_LEFT, initw=0, inith=0, name=self.bridge_label())
@@ -83,6 +92,8 @@ class GisloaderDialog(gui.GeDialog):
         self.SetString(ID_SERVER, self.p["server"])
         self.SetString(ID_EMAIL, self.p["email"])
         self.SetBool(ID_BRIDGE, bool(self.p.get("bridge", True)))
+        self.SetString(ID_FOLDER, self.p.get("folder") or core.DEFAULT_FOLDER)
+        self.SetBool(ID_ASK_FOLDER, bool(self.p.get("ask_folder", True)))
         ids = [k for k, _ in core.PERIODS]
         self.SetInt32(ID_PERIOD, ids.index(self.p.get("period", "month")) if self.p.get("period") in ids else 1)
         self.status("Angemeldet" if self.p.get("token") else "Nicht angemeldet")
@@ -98,6 +109,8 @@ class GisloaderDialog(gui.GeDialog):
         self.p["email"] = self.GetString(ID_EMAIL).strip()
         self.p["bridge"] = self.GetBool(ID_BRIDGE)
         self.p["period"] = self.period()
+        self.p["folder"] = self.GetString(ID_FOLDER).strip() or core.DEFAULT_FOLDER
+        self.p["ask_folder"] = self.GetBool(ID_ASK_FOLDER)
         core.save_prefs(self.p)
 
     def refresh(self):
@@ -135,15 +148,31 @@ class GisloaderDialog(gui.GeDialog):
         elif id == ID_WEB:
             self.sync_prefs()
             core.open_web(self.p)
+        elif id == ID_FOLDER_PICK:
+            chosen = c4d.storage.LoadDialog(
+                title="Speicherordner für gisloader-Exporte",
+                flags=c4d.FILESELECT_DIRECTORY,
+                def_path=self.GetString(ID_FOLDER).strip() or core.DEFAULT_FOLDER,
+            )
+            if chosen:
+                self.SetString(ID_FOLDER, chosen)
+                self.sync_prefs()
+        elif id == ID_ASK_FOLDER:
+            self.sync_prefs()
         elif id == ID_IMPORT:
             idx = self.GetInt32(ID_LIST)
             if idx < 0 or idx >= len(self.exports):
                 self.status("Kein Export ausgewählt")
                 return True
+            self.sync_prefs()
+            folder = choose_folder(self.p)
+            if folder is None:
+                self.status("Import abgebrochen")
+                return True
             try:
                 doc = c4d.documents.GetActiveDocument()
-                root, n = core.import_export(doc, self.p, self.exports[idx]["id"])
-                self.status(f"{n} Objekte unter „{root.GetName()}“")
+                root, n = core.import_export(doc, self.p, self.exports[idx]["id"], folder)
+                self.status(f"{n} Objekte unter „{root.GetName()}“ · Dateien unter {root[root.GetUserDataContainer()[-1][0]] if False else core.resolve_folder(self.p, folder)}")
             except Exception as e:
                 self.status("Import: " + core.describe_error(e))
         elif id == ID_BRIDGE:
@@ -152,6 +181,18 @@ class GisloaderDialog(gui.GeDialog):
             self.SetString(ID_BRIDGE, self.bridge_label())
             self.status(f"Brücke läuft auf Port {core.bridge_port()}" if core.bridge_running() else "Brücke aus")
         return True
+
+
+def choose_folder(p):
+    """Speicherordner für einen Import: Dialog (vorbelegt), wenn eingestellt; None = Abbruch."""
+    if not p.get("ask_folder", True):
+        return core.resolve_folder(p)
+    chosen = c4d.storage.LoadDialog(
+        title="Speicherordner für diesen Export",
+        flags=c4d.FILESELECT_DIRECTORY,
+        def_path=core.resolve_folder(p),
+    )
+    return chosen or None
 
 
 def apply_bridge(p):
@@ -184,7 +225,7 @@ class GisloaderBridgeListener(plugins.MessageData):
         if id == BRIDGE_EVENT_ID:
             try:
                 p = core.load_prefs()
-                for root, n in core.drain_queue(c4d.documents.GetActiveDocument(), p):
+                for root, n in core.drain_queue(c4d.documents.GetActiveDocument(), p, choose_folder):
                     print(f"[gisloader] {n} Objekte importiert unter „{root.GetName()}“")
             except Exception as e:
                 print("[gisloader] Import über Brücke fehlgeschlagen:", e)

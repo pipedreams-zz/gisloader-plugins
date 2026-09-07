@@ -12,7 +12,7 @@ an der Szene in der Form von BlenderGIS (`crs`, `crsx`, `crsy`).
 bl_info = {
     "name": "gisloader",
     "author": "gisloader",
-    "version": (0, 1, 2),
+    "version": (0, 1, 3),
     "blender": (3, 6, 0),
     "location": "3D-Ansicht › Seitenleiste (N) › gisloader",
     "description": "Exporte von gisloader abholen und mit Georeferenz importieren",
@@ -23,6 +23,7 @@ import datetime
 import json
 import os
 import queue
+import re
 import ssl
 import tempfile
 import threading
@@ -34,7 +35,7 @@ import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 
 ADDON_ID = __package__ or __name__
-ADDON_VERSION = "0.1.2"
+ADDON_VERSION = "0.1.3"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Blender-Instanzen nehmen den ersten freien Port ab 47800 (bis +9); Cinema 4D ab 47810.
 BRIDGE_PORT_SPAN = 10
@@ -44,6 +45,32 @@ _bridge_thread: "threading.Thread | None" = None
 _bridge_port = 0
 _jobs: list = []  # zuletzt geladene Exportliste (ungefiltert)
 _ssl_ctx = None
+
+DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Downloads", "gisloader")
+
+
+def resolve_folder(chosen=None):
+    """Speicherordner: gewählter, sonst Vorgabe aus den Einstellungen, sonst Downloads, sonst Temp."""
+    candidates = [chosen, getattr(prefs(), "folder", ""), DEFAULT_FOLDER, os.path.join(tempfile.gettempdir(), "gisloader")]
+    for c in candidates:
+        c = (c or "").strip()
+        if not c:
+            continue
+        c = os.path.abspath(bpy.path.abspath(c))
+        try:
+            os.makedirs(c, exist_ok=True)
+            return c
+        except OSError:
+            continue
+    return tempfile.gettempdir()
+
+
+def export_folder(base, export_id, name):
+    slug = re.sub(r"[^\w.-]+", "_", name or "export", flags=re.UNICODE).strip("_")[:40] or "export"
+    folder = os.path.join(base, f"{slug}_{export_id[:8]}")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
 
 PERIODS = [
     ("week", "Diese Woche", "Exporte seit Montag dieser Woche"),
@@ -147,6 +174,17 @@ class GisloaderPreferences(bpy.types.AddonPreferences):
         default=True,
         update=lambda self, ctx: _apply_bridge(self),
     )
+    folder: StringProperty(
+        name="Speicherordner",
+        description="Hier landen GLB, Texturen und Provenienz je Export (Unterordner je Export)",
+        subtype="DIR_PATH",
+        default=DEFAULT_FOLDER,
+    )
+    ask_folder: BoolProperty(
+        name="Beim Import nach dem Ordner fragen",
+        description="Vor jedem Import (auch über die Brücke) einen Ordnerdialog zeigen, vorbelegt mit dem Speicherordner",
+        default=True,
+    )
     port: IntProperty(
         name="Port",
         description="Erster Port der Brücke; belegt ihn eine andere Blender-Instanz, nimmt das Add-on den nächsten freien (bis +9)",
@@ -163,6 +201,9 @@ class GisloaderPreferences(bpy.types.AddonPreferences):
         row.operator("gisloader.login", icon="KEYINGSET")
         row.operator("gisloader.logout", icon="X")
         col.label(text="Angemeldet" if self.token else "Nicht angemeldet", icon="CHECKMARK" if self.token else "ERROR")
+        col.separator()
+        col.prop(self, "folder")
+        col.prop(self, "ask_folder")
         col.separator()
         col.prop(self, "bridge")
         col.prop(self, "port")
@@ -282,23 +323,48 @@ def _move_to_collection(objs, coll):
         coll.objects.link(o)
 
 
-def import_export(context, export_id, report):
+def _relink_textures(images, tex_dir):
+    """Eingebettete (gepackte) Bilder als Dateien in tex/ ablegen und absolut verknüpfen."""
+    os.makedirs(tex_dir, exist_ok=True)
+    n = 0
+    for img in images:
+        pf = img.packed_file
+        if not pf:
+            continue
+        data = bytes(pf.data)
+        ext = ".jpg" if data[:2] == b"\xff\xd8" else ".png" if data[:4] == b"\x89PNG" else ".bin"
+        base = re.sub(r"[^\w.-]+", "_", img.name) or "texture"
+        path = os.path.join(tex_dir, base + ext)
+        with open(path, "wb") as f:
+            f.write(data)
+        img.filepath_raw = path
+        img.filepath = path
+        img.unpack(method="REMOVE")
+        img.reload()
+        n += 1
+    return n
+
+
+def import_export(context, export_id, report, folder=None):
     p = prefs(context)
     job = api(p, f"/api/exports/{export_id}")
     if job.get("state") != "done":
         raise RuntimeError(f"Export ist {job.get('state')}")
     files = job.get("files", [])
-    folder = os.path.join(tempfile.gettempdir(), "gisloader", export_id)
-    os.makedirs(folder, exist_ok=True)
+    name = job.get("request", {}).get("name") or export_id[:8]
+    folder = export_folder(resolve_folder(folder), export_id, name)
     prov = None
+    # Alles außer dem Zip lokal ablegen: GLB, Texturen (JPEG), OBJ/MTL, Provenienz, README.
     for f in files:
+        if f["name"].endswith(".zip"):
+            continue
+        path = _download(p, export_id, f["name"], folder)
         if f["name"].endswith("provenance.json"):
-            with open(_download(p, export_id, f["name"], folder), "r", encoding="utf-8") as fh:
+            with open(path, "r", encoding="utf-8") as fh:
                 prov = json.load(fh)
     glbs = [f["name"] for f in files if f["name"].endswith(".glb")]
     if not glbs:
         raise RuntimeError("Export enthält keine GLB")
-    name = job.get("request", {}).get("name") or export_id[:8]
     coll = bpy.data.collections.new(f"gisloader · {name}")
     context.scene.collection.children.link(coll)
     georef = None
@@ -306,14 +372,19 @@ def import_export(context, export_id, report):
         if f.get("georef"):
             georef = f["georef"]
             break
+    images_before = set(bpy.data.images.keys())
     for g in glbs:
-        path = _download(p, export_id, g, folder)
+        path = os.path.join(folder, g)
         before = set(bpy.data.objects.keys())
         bpy.ops.import_scene.gltf(filepath=path)
         new = [o for o in bpy.data.objects if o.name not in before]
         _move_to_collection(new, coll)
+    relinked = _relink_textures(
+        [i for i in bpy.data.images if i.name not in images_before], os.path.join(folder, "tex")
+    )
     coll["gisloader_export_id"] = export_id
     coll["gisloader_server"] = p.server
+    coll["gisloader_folder"] = folder
     if prov:
         coll["attribution"] = prov.get("attribution", "")
         region = prov.get("region") or {}
@@ -335,29 +406,47 @@ def import_export(context, export_id, report):
             scn["crs"] = crs
             scn["crsx"] = float(origin.get("x", 0))
             scn["crsy"] = float(origin.get("y", 0))
-    report({"INFO"}, f"{len(glbs)} Datei(en) importiert in „{coll.name}“")
+    report({"INFO"}, f"{len(glbs)} Datei(en) importiert in „{coll.name}“, {relinked} Textur(en) unter {folder}")
     return coll
 
 
 class GISLOADER_OT_import(bpy.types.Operator):
     bl_idname = "gisloader.import_export"
     bl_label = "Importieren"
-    bl_description = "Ausgewählten Export als Collection mit Georeferenz importieren"
+    bl_description = "Ausgewählten Export als Collection mit Georeferenz importieren; Dateien landen im Speicherordner"
     bl_options = {"REGISTER", "UNDO"}
 
     export_id: StringProperty(name="Export-ID", default="")
+    directory: StringProperty(name="Speicherordner", subtype="DIR_PATH", default="")
+    filter_folder: BoolProperty(default=True, options={"HIDDEN"})
+
+    def _resolve_id(self, context):
+        if self.export_id:
+            return self.export_id
+        items = context.scene.gisloader_exports
+        idx = context.scene.gisloader_export_index
+        if idx < 0 or idx >= len(items):
+            return None
+        return items[idx].export_id
+
+    def invoke(self, context, event):
+        if not self._resolve_id(context):
+            self.report({"ERROR"}, "Kein Export ausgewählt")
+            return {"CANCELLED"}
+        p = prefs(context)
+        if not p.ask_folder:
+            return self.execute(context)
+        self.directory = resolve_folder() + os.sep
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
 
     def execute(self, context):
-        export_id = self.export_id
+        export_id = self._resolve_id(context)
         if not export_id:
-            items = context.scene.gisloader_exports
-            idx = context.scene.gisloader_export_index
-            if idx < 0 or idx >= len(items):
-                self.report({"ERROR"}, "Kein Export ausgewählt")
-                return {"CANCELLED"}
-            export_id = items[idx].export_id
+            self.report({"ERROR"}, "Kein Export ausgewählt")
+            return {"CANCELLED"}
         try:
-            import_export(context, export_id, self.report)
+            import_export(context, export_id, self.report, self.directory or None)
             return {"FINISHED"}
         except Exception as e:
             self.report({"ERROR"}, "Import fehlgeschlagen: " + describe_error(e))
@@ -412,6 +501,20 @@ class BridgeHandler(BaseHTTPRequestHandler):
         pass
 
 
+def _import_from_bridge(export_id):
+    """Import aus der Brücke: mit Ordnerdialog (braucht ein Fenster), sonst direkt in den Speicherordner."""
+    wm = bpy.context.window_manager
+    if prefs().ask_folder and wm.windows:
+        win = wm.windows[0]
+        try:
+            with bpy.context.temp_override(window=win, screen=win.screen):
+                bpy.ops.gisloader.import_export("INVOKE_DEFAULT", export_id=export_id)
+            return
+        except Exception as e:
+            print("[gisloader] Ordnerdialog nicht möglich, Speicherordner wird genutzt:", e)
+    bpy.ops.gisloader.import_export("EXEC_DEFAULT", export_id=export_id)
+
+
 def _poll_queue():
     try:
         while True:
@@ -421,7 +524,7 @@ def _poll_queue():
             if server and server.rstrip("/") != p.server.rstrip("/"):
                 print(f"[gisloader] Import abgelehnt: Server {server} ≠ {p.server}")
                 continue
-            bpy.ops.gisloader.import_export(export_id=data["exportId"])
+            _import_from_bridge(data["exportId"])
     except queue.Empty:
         pass
     except Exception as e:
@@ -523,6 +626,7 @@ class GISLOADER_PT_panel(bpy.types.Panel):
         lay.prop(context.scene, "gisloader_period", text="")
         lay.template_list("GISLOADER_UL_exports", "", context.scene, "gisloader_exports", context.scene, "gisloader_export_index", rows=6)
         lay.operator("gisloader.import_export", icon="IMPORT").export_id = ""
+        lay.label(text=(p.folder or DEFAULT_FOLDER).replace(os.path.expanduser("~"), "~"), icon="FILE_FOLDER")
         lay.operator("gisloader.open_web", icon="URL")
         box = lay.box()
         row = box.row()

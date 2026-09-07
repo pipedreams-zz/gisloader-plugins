@@ -12,6 +12,8 @@ import datetime
 import json
 import os
 import queue
+import re
+import shutil
 import ssl
 import tempfile
 import threading
@@ -22,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import c4d
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Cinema 4D nimmt den ersten freien Port ab 47810 (bis +9); Blender liegt ab 47800.
 BRIDGE_PORT = 47810
@@ -30,6 +32,7 @@ BRIDGE_PORT_SPAN = 10
 OLD_BRIDGE_PORT = 47801  # Vorgabe bis 0.1.0, wird beim Laden der Einstellungen umgestellt
 IMPORT_QUEUE: "queue.Queue[dict]" = queue.Queue()
 _ssl_ctx = None
+DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Downloads", "gisloader")
 
 PERIODS = [
     ("week", "Diese Woche"),
@@ -91,7 +94,16 @@ def prefs_path():
 
 
 def load_prefs():
-    p = {"server": DEFAULT_SERVER, "email": "", "token": "", "bridge": True, "port": BRIDGE_PORT, "period": "month"}
+    p = {
+        "server": DEFAULT_SERVER,
+        "email": "",
+        "token": "",
+        "bridge": True,
+        "port": BRIDGE_PORT,
+        "period": "month",
+        "folder": DEFAULT_FOLDER,
+        "ask_folder": True,
+    }
     try:
         with open(prefs_path(), "r", encoding="utf-8") as f:
             p.update(json.load(f))
@@ -174,6 +186,31 @@ def open_web(p):
     webbrowser.open(p["server"].rstrip("/") + "/")
 
 
+# ── Speicherordner ──────────────────────────────────────────────────────
+
+
+def resolve_folder(p, chosen=None):
+    """Speicherordner: gewählter, sonst Vorgabe aus den Einstellungen, sonst Downloads, sonst Temp."""
+    for c in (chosen, p.get("folder"), DEFAULT_FOLDER, os.path.join(tempfile.gettempdir(), "gisloader")):
+        c = (c or "").strip()
+        if not c:
+            continue
+        c = os.path.abspath(os.path.expanduser(c))
+        try:
+            os.makedirs(c, exist_ok=True)
+            return c
+        except OSError:
+            continue
+    return tempfile.gettempdir()
+
+
+def export_folder(base, export_id, name):
+    slug = re.sub(r"[^\w.-]+", "_", name or "export", flags=re.UNICODE).strip("_")[:40] or "export"
+    folder = os.path.join(base, f"{slug}_{export_id[:8]}")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
 # ── Import ──────────────────────────────────────────────────────────────
 
 
@@ -197,23 +234,73 @@ def _top_guids(doc):
     return {o.GetGUID() for o in doc.GetObjects()}
 
 
-def import_export(doc, p, export_id):
-    """Lädt die GLBs eines Exports in das Dokument, hängt sie unter ein Null-Objekt mit Georeferenz."""
+def _shaders(node):
+    while node:
+        yield node
+        yield from _shaders(node.GetDown())
+        node = node.GetNext()
+
+
+def _find_texture(fn, search_dirs):
+    """Texturdatei des Importers finden: absolut, relativ zu den Suchordnern oder in deren tex/-Unterordnern."""
+    if not fn:
+        return None
+    if os.path.isabs(fn) and os.path.exists(fn):
+        return fn
+    base = os.path.basename(fn)
+    for d in search_dirs:
+        for cand in (os.path.join(d, fn), os.path.join(d, base), os.path.join(d, "tex", base)):
+            if os.path.exists(cand):
+                return cand
+    return None
+
+
+def relink_textures(doc, materials, folder, search_dirs):
+    """Bitmap-Shader der importierten Materialien auf absolute Pfade unter folder/tex legen."""
+    tex_dir = os.path.join(folder, "tex")
+    n = 0
+    for mat in materials:
+        for sh in _shaders(mat.GetFirstShader()):
+            if sh.GetType() != c4d.Xbitmap:
+                continue
+            fn = sh[c4d.BITMAPSHADER_FILENAME]
+            src = _find_texture(fn, search_dirs)
+            if not src:
+                continue
+            target = src
+            if os.path.abspath(os.path.dirname(src)) != os.path.abspath(tex_dir):
+                os.makedirs(tex_dir, exist_ok=True)
+                target = os.path.join(tex_dir, os.path.basename(src))
+                if not os.path.exists(target):
+                    shutil.copy2(src, target)
+            sh[c4d.BITMAPSHADER_FILENAME] = target
+            n += 1
+    return n
+
+
+def import_export(doc, p, export_id, folder=None):
+    """
+    Lädt die Dateien eines Exports in den Speicherordner (Unterordner je Export),
+    importiert die GLBs unter ein Null-Objekt mit Georeferenz und verknüpft die
+    Texturen absolut unter <Ordner>/tex.
+    """
     job = api(p, f"/api/exports/{export_id}")
     if job.get("state") != "done":
         raise RuntimeError(f"Export ist {job.get('state')}")
     files = job.get("files", [])
-    folder = os.path.join(tempfile.gettempdir(), "gisloader", export_id)
-    os.makedirs(folder, exist_ok=True)
+    name = job.get("request", {}).get("name") or export_id[:8]
+    folder = export_folder(resolve_folder(p, folder), export_id, name)
     prov = None
     for f in files:
+        if f["name"].endswith(".zip"):
+            continue
+        path = _download(p, export_id, f["name"], folder)
         if f["name"].endswith("provenance.json"):
-            with open(_download(p, export_id, f["name"], folder), "r", encoding="utf-8") as fh:
+            with open(path, "r", encoding="utf-8") as fh:
                 prov = json.load(fh)
     glbs = [f["name"] for f in files if f["name"].endswith(".glb")]
     if not glbs:
         raise RuntimeError("Export enthält keine GLB")
-    name = job.get("request", {}).get("name") or export_id[:8]
     georef = None
     for f in (prov or {}).get("files", []):
         if f.get("georef"):
@@ -226,8 +313,9 @@ def import_export(doc, p, export_id):
     doc.InsertObject(root)
     doc.AddUndo(c4d.UNDOTYPE_NEW, root)
     imported = 0
+    mats_before = {m.GetGUID() for m in doc.GetMaterials()}
     for g in glbs:
-        path = _download(p, export_id, g, folder)
+        path = os.path.join(folder, g)
         before = _top_guids(doc)
         ok = c4d.documents.MergeDocument(
             doc, path, c4d.SCENEFILTER_OBJECTS | c4d.SCENEFILTER_MATERIALS | c4d.SCENEFILTER_MERGESCENE, None
@@ -239,8 +327,16 @@ def import_export(doc, p, export_id):
             o.Remove()
             o.InsertUnderLast(root)
             imported += 1
+    new_mats = [m for m in doc.GetMaterials() if m.GetGUID() not in mats_before]
+    search = [folder, os.path.join(folder, "tex"), tempfile.gettempdir(), doc.GetDocumentPath() or ""]
+    for g in glbs:
+        search.append(os.path.join(folder, os.path.splitext(g)[0]))
+        search.append(os.path.join(folder, os.path.splitext(g)[0] + "_tex"))
+    relinked = relink_textures(doc, new_mats, folder, [d for d in search if d])
+    print(f"[gisloader] {relinked} Textur(en) verknüpft unter {os.path.join(folder, 'tex')}")
     _add_userdata(root, "gisloader_export_id", export_id)
     _add_userdata(root, "gisloader_server", p["server"])
+    _add_userdata(root, "gisloader_folder", folder)
     if prov:
         _add_userdata(root, "attribution", prov.get("attribution", ""))
         region = prov.get("region") or {}
@@ -352,8 +448,8 @@ def bridge_port():
     return _bridge_port
 
 
-def drain_queue(doc, p):
-    """Im Hauptthread: alle wartenden Importe ausführen."""
+def drain_queue(doc, p, choose_folder=None):
+    """Im Hauptthread: alle wartenden Importe ausführen; choose_folder(p) liefert den Ordner oder None (Abbruch)."""
     done = []
     try:
         while True:
@@ -362,7 +458,11 @@ def drain_queue(doc, p):
             if server and server.rstrip("/") != p["server"].rstrip("/"):
                 print(f"[gisloader] Import abgelehnt: Server {server} ≠ {p['server']}")
                 continue
-            done.append(import_export(doc, p, data["exportId"]))
+            folder = choose_folder(p) if choose_folder else None
+            if choose_folder and folder is None:
+                print("[gisloader] Import abgebrochen (kein Ordner gewählt)")
+                continue
+            done.append(import_export(doc, p, data["exportId"], folder))
     except queue.Empty:
         pass
     return done

@@ -32,6 +32,19 @@ neu starten.
   Hauptthread von Cinema 4D. Blender nutzt den Bereich ab 47800, beide
   Programme laufen nebeneinander.
 
+## Speicherordner und Texturen
+
+- Im Dialog steht der Speicherordner (Vorgabe `~/Downloads/gisloader`), „…“
+  öffnet die Ordnerwahl. Jeder Export bekommt darin einen Unterordner
+  `<Ort>_<ID>` mit GLB, Texturen (JPEG), Provenienz und README.
+- „Beim Import fragen“ (Vorgabe an) zeigt vor jedem Import, auch über die
+  Brücke, einen Ordnerdialog, vorbelegt mit dem Speicherordner; Abbrechen
+  bricht den Import ab. Ohne Häkchen landet alles direkt im Speicherordner.
+- Nach dem Import werden die Bitmap-Shader der neuen Materialien auf absolute
+  Pfade unter `tex/` im Exportordner gesetzt (Dateien, die der Importer
+  anderswo abgelegt hat, werden dorthin kopiert). Der Ordner steht als User
+  Data `gisloader_folder` am Null-Objekt.
+
 ## Georeferenz
 
 - Cinema 4D und glTF sind Y-up: X = Ost, Y = Höhe, Z = −Nord. Dokumenteinheit
@@ -50,6 +63,5 @@ neu starten.
   (macOS `/etc/ssl/cert.pem`, Linux `ca-certificates`; Windows liest den
   Zertifikatspeicher des Systems). Erscheint der Fehler weiterhin, fehlt auf
   dem Rechner das Systembündel.
-- Plugin-ID 1070158 (registriert bei plugincafe.maxon.net). Das Brücken-Plugin
-  (MessageData) nutzt noch die Test-ID 1000008; für die Weitergabe eine zweite
-  ID registrieren und in `gisloader.pyp` als `BRIDGE_EVENT_ID` eintragen.
+- Plugin-IDs 1070158 (Dialog) und 1070160 (Brücke), registriert bei
+  plugincafe.maxon.net.

@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import c4d
 
-VERSION = "0.1.2"
+VERSION = "0.1.4"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Cinema 4D nimmt den ersten freien Port ab 47810 (bis +9); Blender liegt ab 47800.
 BRIDGE_PORT = 47810
@@ -255,6 +255,40 @@ def _find_texture(fn, search_dirs):
     return None
 
 
+def _save_shader_bitmap(doc, sh, fn, tex_dir):
+    """
+    Textur eines Bitmap-Shaders als Datei ablegen. Der glTF-Importer legt
+    eingebettete Bilder auf einer virtuellen Ramdisk ab (ramdisk://…); die
+    Bitmap holen wir dann aus dem Shader selbst und speichern sie nach tex/.
+    """
+    base = os.path.basename(fn.split("?")[0].rstrip("/")) or "texture"
+    if not os.path.splitext(base)[1]:
+        base += ".png"
+    target = os.path.join(tex_dir, base)
+    if os.path.exists(target):
+        return target
+    bmp = c4d.bitmaps.BaseBitmap()
+    ok = False
+    try:
+        ok = bmp.InitWith(fn)[0] == c4d.IMAGERESULT_OK
+    except Exception:
+        ok = False
+    if not ok:
+        irs = c4d.modules.render.InitRenderStruct(doc)
+        if sh.InitRender(irs) == c4d.INITRENDERRESULT_OK:
+            got = sh.GetBitmap()
+            sh.FreeRender()
+            if got:
+                bmp, ok = got, True
+    if not ok:
+        return None
+    fmt = c4d.FILTER_JPG if base.lower().endswith((".jpg", ".jpeg")) else c4d.FILTER_PNG
+    os.makedirs(tex_dir, exist_ok=True)
+    if bmp.Save(target, fmt) != c4d.IMAGERESULT_OK:
+        return None
+    return target
+
+
 def relink_textures(doc, materials, folder, search_dirs):
     """Bitmap-Shader der importierten Materialien auf absolute Pfade unter folder/tex legen."""
     tex_dir = os.path.join(folder, "tex")
@@ -263,16 +297,20 @@ def relink_textures(doc, materials, folder, search_dirs):
         for sh in _shaders(mat.GetFirstShader()):
             if sh.GetType() != c4d.Xbitmap:
                 continue
-            fn = sh[c4d.BITMAPSHADER_FILENAME]
+            fn = sh[c4d.BITMAPSHADER_FILENAME] or ""
             src = _find_texture(fn, search_dirs)
-            if not src:
-                continue
-            target = src
-            if os.path.abspath(os.path.dirname(src)) != os.path.abspath(tex_dir):
-                os.makedirs(tex_dir, exist_ok=True)
-                target = os.path.join(tex_dir, os.path.basename(src))
-                if not os.path.exists(target):
-                    shutil.copy2(src, target)
+            if src:
+                target = src
+                if os.path.abspath(os.path.dirname(src)) != os.path.abspath(tex_dir):
+                    os.makedirs(tex_dir, exist_ok=True)
+                    target = os.path.join(tex_dir, os.path.basename(src))
+                    if not os.path.exists(target):
+                        shutil.copy2(src, target)
+            else:
+                target = _save_shader_bitmap(doc, sh, fn, tex_dir)
+                if not target:
+                    print(f"[gisloader] Textur nicht sicherbar: {fn}")
+                    continue
             sh[c4d.BITMAPSHADER_FILENAME] = target
             n += 1
     return n
@@ -313,7 +351,7 @@ def import_export(doc, p, export_id, folder=None):
     doc.InsertObject(root)
     doc.AddUndo(c4d.UNDOTYPE_NEW, root)
     imported = 0
-    mats_before = {m.GetGUID() for m in doc.GetMaterials()}
+    mats_before = list(doc.GetMaterials())  # C4DAtom vergleicht den zugrunde liegenden Zeiger
     for g in glbs:
         path = os.path.join(folder, g)
         before = _top_guids(doc)
@@ -327,7 +365,7 @@ def import_export(doc, p, export_id, folder=None):
             o.Remove()
             o.InsertUnderLast(root)
             imported += 1
-    new_mats = [m for m in doc.GetMaterials() if m.GetGUID() not in mats_before]
+    new_mats = [m for m in doc.GetMaterials() if all(m != b for b in mats_before)]
     search = [folder, os.path.join(folder, "tex"), tempfile.gettempdir(), doc.GetDocumentPath() or ""]
     for g in glbs:
         search.append(os.path.join(folder, os.path.splitext(g)[0]))

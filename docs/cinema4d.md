@@ -41,8 +41,9 @@ neu starten.
   Brücke, einen Ordnerdialog, vorbelegt mit dem Speicherordner; Abbrechen
   bricht den Import ab. Ohne Häkchen landet alles direkt im Speicherordner.
 - Nach dem Import werden die Bitmap-Shader der neuen Materialien auf absolute
-  Pfade unter `tex/` im Exportordner gesetzt (Dateien, die der Importer
-  anderswo abgelegt hat, werden dorthin kopiert). Der Ordner steht als User
+  Pfade unter `tex/` im Exportordner gesetzt. Eingebettete Texturen legt der
+  glTF-Importer auf einer virtuellen Ramdisk ab (`ramdisk://…`); das Plugin
+  speichert sie von dort als Datei nach `tex/`. Der Ordner steht als User
   Data `gisloader_folder` am Null-Objekt.
 
 ## Georeferenz

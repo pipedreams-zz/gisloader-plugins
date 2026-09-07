@@ -48,6 +48,16 @@ neu starten.
   Image-Knoten, Port `url` bzw. `tex0/path`). Der Ordner steht als User
   Data `gisloader_folder` am Null-Objekt.
 
+## Corona Renderer
+
+Ist Corona installiert, lässt sich im Dialog „Corona-Materialien erzeugen“
+einschalten. Nach dem Import legt das Plugin je Material der GLB ein Corona
+Physical Material an (Grundfarbe aus dem glTF-Material, Textur aus `tex/`
+im Corona-Bitmap-Shader), hängt die Texture-Tags um und entfernt die vom
+Importer erzeugten Materialien. Die Parameter werden zur Laufzeit aus der
+Materialbeschreibung ermittelt (Base Color bzw. Diffuse); findet das Plugin
+keinen Textur-Slot, steht in der Python-Konsole die Liste der Kandidaten.
+
 ## Georeferenz
 
 - Cinema 4D und glTF sind Y-up: X = Ost, Y = Höhe, Z = −Nord. Dokumenteinheit

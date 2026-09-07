@@ -9,12 +9,14 @@ rechnet Meter um. Ursprung und CRS stehen als User Data am Null-Objekt.
 """
 
 import datetime
+import glob
 import json
 import os
 import queue
 import re
 import shutil
 import ssl
+import struct
 import tempfile
 import threading
 import urllib.error
@@ -29,7 +31,7 @@ try:
 except ImportError:  # pragma: no cover – alte Versionen ohne Node-API
     maxon = None
 
-VERSION = "0.1.5"
+VERSION = "0.1.6"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Cinema 4D nimmt den ersten freien Port ab 47810 (bis +9); Blender liegt ab 47800.
 BRIDGE_PORT = 47810
@@ -108,6 +110,7 @@ def load_prefs():
         "period": "month",
         "folder": DEFAULT_FOLDER,
         "ask_folder": True,
+        "corona": False,
     }
     try:
         with open(prefs_path(), "r", encoding="utf-8") as f:
@@ -402,6 +405,149 @@ def _relink_node_material(doc, mat, tex_dir):
     return n
 
 
+# ── Corona Renderer ────────────────────────────────────────────────────
+
+CORONA_PHYSICAL_MTL = 1056306  # Corona Physical Material (ab Corona 7)
+CORONA_LEGACY_MTL = 1032100  # Corona Material (klassisch)
+CORONA_BITMAP = 1036473  # Corona Bitmap Shader
+
+
+def corona_available():
+    return any(
+        c4d.plugins.FindPlugin(i, c4d.PLUGINTYPE_MATERIAL) is not None
+        for i in (CORONA_PHYSICAL_MTL, CORONA_LEGACY_MTL)
+    )
+
+
+def _glb_materials(path):
+    """Materialien der GLB (Name, Grundfarbe, ob Textur) aus dem JSON-Chunk lesen."""
+    with open(path, "rb") as f:
+        magic, _version, _length = struct.unpack("<III", f.read(12))
+        if magic != 0x46546C67:
+            return []
+        chunk_len, chunk_type = struct.unpack("<II", f.read(8))
+        if chunk_type != 0x4E4F534A:
+            return []
+        gltf = json.loads(f.read(chunk_len).decode("utf-8"))
+    out = []
+    for m in gltf.get("materials", []):
+        pbr = m.get("pbrMetallicRoughness", {})
+        factor = pbr.get("baseColorFactor", [1, 1, 1, 1])
+        out.append({"name": m.get("name", ""), "color": factor[:3], "textured": "baseColorTexture" in pbr})
+    return out
+
+
+def _lin_to_srgb(v):
+    return v * 12.92 if v <= 0.0031308 else 1.055 * (v ** (1 / 2.4)) - 0.055
+
+
+def _desc_params(node):
+    """(Name, Gruppenname, DescID, DTYPE) aller Parameter einer Beschreibung."""
+    desc = node.GetDescription(c4d.DESCFLAGS_DESC_NONE)
+    groups = {}
+    entries = []
+    for bc, pid, gid in desc:
+        name = bc[c4d.DESC_NAME] or bc[c4d.DESC_SHORT_NAME] or ""
+        dtype = pid[-1].dtype if pid.GetDepth() else 0
+        if dtype == c4d.DTYPE_GROUP:
+            groups[str(pid)] = name
+        entries.append((name, str(gid), pid, dtype))
+    return [(n, groups.get(g, ""), pid, dt) for n, g, pid, dt in entries]
+
+
+def _find_param(params, dtype, names):
+    """Ersten Parameter mit Typ dtype finden, dessen Name oder Gruppenname eines der Muster enthält."""
+    for pattern in names:
+        pat = pattern.lower()
+        for name, group, pid, dt in params:
+            if dt == dtype and (pat in name.lower() or pat in group.lower()):
+                return pid, name, group
+    return None
+
+
+def _corona_material(doc, name, color, texture_path):
+    """Corona-Material mit Grundfarbe oder Textur anlegen; Parameter-IDs kommen aus der Beschreibung."""
+    mtl_id = CORONA_PHYSICAL_MTL if c4d.plugins.FindPlugin(CORONA_PHYSICAL_MTL, c4d.PLUGINTYPE_MATERIAL) else CORONA_LEGACY_MTL
+    mat = c4d.BaseMaterial(mtl_id)
+    if mat is None:
+        return None
+    mat.SetName(name)
+    params = _desc_params(mat)
+    color_param = _find_param(params, c4d.DTYPE_COLOR, ["base color", "diffuse color", "diffuse", "color"])
+    tex_param = _find_param(params, c4d.DTYPE_BASELISTLINK, ["base color", "diffuse", "color"])
+    if color_param and color is not None:
+        mat[color_param[0]] = c4d.Vector(*[_lin_to_srgb(max(0.0, min(1.0, c))) for c in color])
+    if texture_path and tex_param:
+        shader = c4d.BaseShader(CORONA_BITMAP) if c4d.plugins.FindPlugin(CORONA_BITMAP, c4d.PLUGINTYPE_SHADER) else None
+        if shader is not None:
+            sp = _desc_params(shader)
+            fparam = _find_param(sp, c4d.DTYPE_FILENAME, ["filename", "file", "path", "image"])
+            if fparam:
+                shader[fparam[0]] = texture_path
+            else:
+                shader = None
+        if shader is None:
+            shader = c4d.BaseShader(c4d.Xbitmap)
+            shader[c4d.BITMAPSHADER_FILENAME] = texture_path
+        mat.InsertShader(shader)
+        mat[tex_param[0]] = shader
+    elif texture_path:
+        print(f"[gisloader] Corona: kein Textur-Slot in {mat.GetTypeName()} gefunden; Parameter: "
+              + ", ".join(f"{n}/{g}" for n, g, _, dt in params if dt == c4d.DTYPE_BASELISTLINK)[:800])
+    mat.Update(True, True)
+    doc.InsertMaterial(mat)
+    doc.AddUndo(c4d.UNDOTYPE_NEW, mat)
+    return mat
+
+
+def _walk(obj):
+    while obj:
+        yield obj
+        yield from _walk(obj.GetDown())
+        obj = obj.GetNext()
+
+
+def convert_to_corona(doc, root, glb_paths, materials, tex_dir):
+    """
+    Für jedes Material der GLBs ein Corona-Material anlegen (Farbe aus baseColorFactor,
+    Textur aus tex/), Texture-Tags unter root umhängen, importierte Materialien entfernen.
+    Liefert die Zahl der ersetzten Materialien.
+    """
+    by_name = {}
+    for g in glb_paths:
+        for m in _glb_materials(g):
+            by_name.setdefault(m["name"], m)
+    created = {}
+    for mat in materials:
+        name = mat.GetName()
+        info = by_name.get(name) or by_name.get(name.split(".")[0]) or {"name": name, "color": None, "textured": False}
+        texture = None
+        if info["textured"] or not by_name.get(name):
+            hits = sorted(glob.glob(os.path.join(tex_dir, f"{name}_*"))) + sorted(glob.glob(os.path.join(tex_dir, f"{name}.*")))
+            texture = hits[0] if hits else None
+        cm = _corona_material(doc, name, info["color"], texture)
+        if cm is not None:
+            created[name] = (mat, cm)
+    if not created:
+        return 0
+    old_by_name = {n: pair[0] for n, pair in created.items()}
+    for obj in _walk(root):
+        for tag in obj.GetTags():
+            if tag.GetType() != c4d.Ttexture:
+                continue
+            old = tag[c4d.TEXTURETAG_MATERIAL]
+            if old is None:
+                continue
+            pair = created.get(old.GetName())
+            if pair and old == pair[0]:
+                doc.AddUndo(c4d.UNDOTYPE_CHANGE, tag)
+                tag[c4d.TEXTURETAG_MATERIAL] = pair[1]
+    for name, (old, _cm) in created.items():
+        doc.AddUndo(c4d.UNDOTYPE_DELETE, old)
+        old.Remove()
+    return len(created)
+
+
 def import_export(doc, p, export_id, folder=None):
     """
     Lädt die Dateien eines Exports in den Speicherordner (Unterordner je Export),
@@ -458,6 +604,15 @@ def import_export(doc, p, export_id, folder=None):
         search.append(os.path.join(folder, os.path.splitext(g)[0] + "_tex"))
     relinked = relink_textures(doc, new_mats, folder, [d for d in search if d])
     print(f"[gisloader] {relinked} Textur(en) verknüpft unter {os.path.join(folder, 'tex')}")
+    if p.get("corona") and corona_available():
+        try:
+            n_corona = convert_to_corona(doc, root, [os.path.join(folder, g) for g in glbs], new_mats, os.path.join(folder, "tex"))
+            print(f"[gisloader] {n_corona} Material(ien) durch Corona-Materialien ersetzt")
+        except Exception as e:
+            import traceback
+
+            print("[gisloader] Corona-Umwandlung fehlgeschlagen:", repr(e))
+            traceback.print_exc()
     _add_userdata(root, "gisloader_export_id", export_id)
     _add_userdata(root, "gisloader_server", p["server"])
     _add_userdata(root, "gisloader_folder", folder)

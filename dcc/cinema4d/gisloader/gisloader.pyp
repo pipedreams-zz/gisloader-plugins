@@ -32,6 +32,7 @@ ID_PERIOD = 1012
 ID_FOLDER = 1013
 ID_FOLDER_PICK = 1014
 ID_ASK_FOLDER = 1015
+ID_CORONA = 1016
 
 
 class GisloaderDialog(gui.GeDialog):
@@ -73,6 +74,10 @@ class GisloaderDialog(gui.GeDialog):
         self.AddButton(ID_FOLDER_PICK, c4d.BFH_RIGHT, name="…")
         self.AddCheckbox(ID_ASK_FOLDER, c4d.BFH_LEFT, initw=0, inith=0, name="Beim Import fragen")
         self.GroupEnd()
+        self.GroupBegin(2005, c4d.BFH_SCALEFIT, cols=1)
+        self.GroupBorderSpace(8, 0, 8, 4)
+        self.AddCheckbox(ID_CORONA, c4d.BFH_LEFT, initw=0, inith=0, name="Corona-Materialien erzeugen (Corona Renderer installiert)")
+        self.GroupEnd()
         self.GroupBegin(2003, c4d.BFH_SCALEFIT, cols=2)
         self.GroupBorderSpace(8, 0, 8, 8)
         self.AddCheckbox(ID_BRIDGE, c4d.BFH_LEFT, initw=0, inith=0, name=self.bridge_label())
@@ -94,6 +99,9 @@ class GisloaderDialog(gui.GeDialog):
         self.SetBool(ID_BRIDGE, bool(self.p.get("bridge", True)))
         self.SetString(ID_FOLDER, self.p.get("folder") or core.DEFAULT_FOLDER)
         self.SetBool(ID_ASK_FOLDER, bool(self.p.get("ask_folder", True)))
+        has_corona = core.corona_available()
+        self.SetBool(ID_CORONA, has_corona and bool(self.p.get("corona", False)))
+        self.Enable(ID_CORONA, has_corona)
         ids = [k for k, _ in core.PERIODS]
         self.SetInt32(ID_PERIOD, ids.index(self.p.get("period", "month")) if self.p.get("period") in ids else 1)
         self.status("Angemeldet" if self.p.get("token") else "Nicht angemeldet")
@@ -111,6 +119,7 @@ class GisloaderDialog(gui.GeDialog):
         self.p["period"] = self.period()
         self.p["folder"] = self.GetString(ID_FOLDER).strip() or core.DEFAULT_FOLDER
         self.p["ask_folder"] = self.GetBool(ID_ASK_FOLDER)
+        self.p["corona"] = self.GetBool(ID_CORONA)
         core.save_prefs(self.p)
 
     def refresh(self):
@@ -157,7 +166,7 @@ class GisloaderDialog(gui.GeDialog):
             if chosen:
                 self.SetString(ID_FOLDER, chosen)
                 self.sync_prefs()
-        elif id == ID_ASK_FOLDER:
+        elif id in (ID_ASK_FOLDER, ID_CORONA):
             self.sync_prefs()
         elif id == ID_IMPORT:
             idx = self.GetInt32(ID_LIST)

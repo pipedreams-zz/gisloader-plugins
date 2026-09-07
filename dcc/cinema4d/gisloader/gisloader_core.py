@@ -24,7 +24,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import c4d
 
-VERSION = "0.1.4"
+try:
+    import maxon
+except ImportError:  # pragma: no cover – alte Versionen ohne Node-API
+    maxon = None
+
+VERSION = "0.1.5"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Cinema 4D nimmt den ersten freien Port ab 47810 (bis +9); Blender liegt ab 47800.
 BRIDGE_PORT = 47810
@@ -255,42 +260,62 @@ def _find_texture(fn, search_dirs):
     return None
 
 
-def _save_shader_bitmap(doc, sh, fn, tex_dir):
-    """
-    Textur eines Bitmap-Shaders als Datei ablegen. Der glTF-Importer legt
-    eingebettete Bilder auf einer virtuellen Ramdisk ab (ramdisk://…); die
-    Bitmap holen wir dann aus dem Shader selbst und speichern sie nach tex/.
-    """
-    base = os.path.basename(fn.split("?")[0].rstrip("/")) or "texture"
+def _target_for(fn, tex_dir):
+    base = os.path.basename(str(fn).split("?")[0].rstrip("/")) or "texture"
     if not os.path.splitext(base)[1]:
         base += ".png"
-    target = os.path.join(tex_dir, base)
+    return os.path.join(tex_dir, base)
+
+
+def _materialize(doc, fn, tex_dir, shader=None):
+    """
+    Bild hinter einem Pfad als Datei unter tex/ ablegen und den Zielpfad liefern.
+    Der glTF-Importer legt eingebettete Bilder auf einer virtuellen Ramdisk ab
+    (ramdisk://…); Reihenfolge der Versuche: Datei liegt schon auf der Platte,
+    maxon-Url-Stream kopieren, BaseBitmap.InitWith, Bitmap aus dem Shader.
+    """
+    fn = str(fn or "")
+    target = _target_for(fn, tex_dir)
     if os.path.exists(target):
         return target
+    os.makedirs(tex_dir, exist_ok=True)
+    if fn and not fn.startswith("ramdisk://") and os.path.exists(fn):
+        shutil.copy2(fn, target)
+        return target
+    if maxon is not None and fn:
+        try:
+            stream = maxon.Url(fn).OpenInputStream()
+            data = stream.ReadEOS()
+            stream.Close()
+            if data:
+                with open(target, "wb") as f:
+                    f.write(bytes(data))
+                return target
+        except Exception as e:
+            print(f"[gisloader] Url-Stream für {fn} nicht lesbar: {e}")
     bmp = c4d.bitmaps.BaseBitmap()
     ok = False
     try:
-        ok = bmp.InitWith(fn)[0] == c4d.IMAGERESULT_OK
+        ok = fn != "" and bmp.InitWith(fn)[0] == c4d.IMAGERESULT_OK
     except Exception:
         ok = False
-    if not ok:
+    if not ok and shader is not None:
         irs = c4d.modules.render.InitRenderStruct(doc)
-        if sh.InitRender(irs) == c4d.INITRENDERRESULT_OK:
-            got = sh.GetBitmap()
-            sh.FreeRender()
+        if shader.InitRender(irs) == c4d.INITRENDERRESULT_OK:
+            got = shader.GetBitmap()
+            shader.FreeRender()
             if got:
                 bmp, ok = got, True
     if not ok:
         return None
-    fmt = c4d.FILTER_JPG if base.lower().endswith((".jpg", ".jpeg")) else c4d.FILTER_PNG
-    os.makedirs(tex_dir, exist_ok=True)
+    fmt = c4d.FILTER_JPG if target.lower().endswith((".jpg", ".jpeg")) else c4d.FILTER_PNG
     if bmp.Save(target, fmt) != c4d.IMAGERESULT_OK:
         return None
     return target
 
 
 def relink_textures(doc, materials, folder, search_dirs):
-    """Bitmap-Shader der importierten Materialien auf absolute Pfade unter folder/tex legen."""
+    """Texturen der importierten Materialien (Bitmap-Shader und Node-Materialien) nach tex/ legen."""
     tex_dir = os.path.join(folder, "tex")
     n = 0
     for mat in materials:
@@ -299,20 +324,81 @@ def relink_textures(doc, materials, folder, search_dirs):
                 continue
             fn = sh[c4d.BITMAPSHADER_FILENAME] or ""
             src = _find_texture(fn, search_dirs)
-            if src:
-                target = src
-                if os.path.abspath(os.path.dirname(src)) != os.path.abspath(tex_dir):
-                    os.makedirs(tex_dir, exist_ok=True)
-                    target = os.path.join(tex_dir, os.path.basename(src))
-                    if not os.path.exists(target):
-                        shutil.copy2(src, target)
-            else:
-                target = _save_shader_bitmap(doc, sh, fn, tex_dir)
-                if not target:
-                    print(f"[gisloader] Textur nicht sicherbar: {fn}")
-                    continue
+            target = _materialize(doc, src or fn, tex_dir, sh)
+            if not target:
+                print(f"[gisloader] Textur nicht sicherbar: {fn}")
+                continue
             sh[c4d.BITMAPSHADER_FILENAME] = target
             n += 1
+        try:
+            n += _relink_node_material(doc, mat, tex_dir)
+        except Exception as e:
+            print(f"[gisloader] Node-Material {mat.GetName()} nicht umgelegt: {e!r}")
+    return n
+
+
+# Node-Spaces und ihre Bildknoten: (Space-ID, Pfad des URL-Ports in den Eingängen)
+NODE_IMAGE_PORTS = [
+    (maxon.Id("net.maxon.nodespace.standard") if maxon else None, ("url",)),
+    (maxon.Id("com.redshift3d.redshift4c4d.class.nodespace") if maxon else None, ("tex0", "path")),
+]
+
+
+def _find_port(node, path):
+    port = node.GetInputs()
+    for seg in path:
+        port = port.FindChild(seg)
+        if port is None or not port.IsValid():
+            return None
+    return port
+
+
+def _port_value(port):
+    for getter in ("GetPortValue", "GetDefaultValue"):
+        fn = getattr(port, getter, None)
+        if fn:
+            try:
+                v = fn()
+                if v is not None:
+                    return v
+            except Exception:
+                pass
+    return None
+
+
+def _relink_node_material(doc, mat, tex_dir):
+    """Image-Knoten eines Node-Materials (Standard oder Redshift) auf Dateien unter tex/ umlegen."""
+    if maxon is None:
+        return 0
+    nm = mat.GetNodeMaterialReference()
+    if nm is None:
+        return 0
+    n = 0
+    for space, path in NODE_IMAGE_PORTS:
+        if space is None or not nm.HasSpace(space):
+            continue
+        graph = nm.GetGraph(space)
+        if graph is None or graph.IsNullValue():
+            continue
+        root = graph.GetViewRoot()
+        with graph.BeginTransaction() as tr:
+            for node in root.GetInnerNodes(mask=maxon.NODE_KIND.NODE, includeThis=False):
+                port = _find_port(node, path)
+                if port is None:
+                    continue
+                current = _port_value(port)
+                fn = str(current) if current is not None else ""
+                if not fn or (not fn.startswith("ramdisk://") and os.path.exists(fn) and os.path.dirname(fn) == tex_dir):
+                    continue
+                target = _materialize(doc, fn, tex_dir)
+                if not target:
+                    print(f"[gisloader] Node-Textur nicht sicherbar: {fn}")
+                    continue
+                url = maxon.Url()
+                url.SetSystemPath(target)
+                port.SetPortValue(url)
+                n += 1
+            tr.Commit()
     return n
 
 

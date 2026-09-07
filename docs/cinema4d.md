@@ -43,7 +43,9 @@ neu starten.
 - Nach dem Import werden die Bitmap-Shader der neuen Materialien auf absolute
   Pfade unter `tex/` im Exportordner gesetzt. Eingebettete Texturen legt der
   glTF-Importer auf einer virtuellen Ramdisk ab (`ramdisk://…`); das Plugin
-  speichert sie von dort als Datei nach `tex/`. Der Ordner steht als User
+  speichert sie von dort als Datei nach `tex/`. Das gilt für klassische
+  Bitmap-Shader und für Node-Materialien (Standard- und Redshift-Node-Space:
+  Image-Knoten, Port `url` bzw. `tex0/path`). Der Ordner steht als User
   Data `gisloader_folder` am Null-Objekt.
 
 ## Georeferenz

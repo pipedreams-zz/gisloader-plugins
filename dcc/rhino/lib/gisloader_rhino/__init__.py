@@ -33,7 +33,7 @@ import System
 import Eto.Drawing as drawing
 import Eto.Forms as forms
 
-VERSION = "0.1.10"
+VERSION = "0.1.11"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Rhino nimmt den ersten freien Port ab 47820 (bis +9); Blender ab 47800, Cinema 4D ab 47810.
 BRIDGE_PORT = 47820
@@ -308,6 +308,77 @@ def _relink_textures(doc, mats_before, folder, glbs):
     return n
 
 
+BUILDING_KINDS = {
+    "dach": "Dach",
+    "roof": "Dach",
+    "wand": "Wand",
+    "wall": "Wand",
+    "boden": "Boden",
+    "ground": "Boden",
+    "grund": "Boden",
+    "footprint": "Grundriss",
+}
+
+
+def _kind_of(doc, obj):
+    """Bauteilart eines importierten Gebäudeobjekts aus Objekt- oder Materialname."""
+    name = (obj.Name or "").strip().lower()
+    for key, kind in BUILDING_KINDS.items():
+        if name.startswith(key):
+            return kind
+    try:
+        mi = obj.Attributes.MaterialIndex
+        mat = doc.Materials[mi] if mi >= 0 else None
+        mname = (mat.Name or "").lower() if mat else ""
+        for key, kind in BUILDING_KINDS.items():
+            if key in mname:
+                return kind
+    except Exception:
+        pass
+    return "Sonstige"
+
+
+def _flatten_building_layers(doc, new_objs, new_layers):
+    """
+    Der glTF-Importer legt je Gebäude eine Ebene an (gml:id). Für Rhino genügt je
+    Bauteilart eine Ebene (Gebaeude/Dach, Gebaeude/Wand …); die gml:id bleibt als
+    Benutzertext am Objekt, die leeren Gebäudeebenen verschwinden.
+    """
+    parents = [l for l in new_layers if (l.Name or "").lower() in ("gebaeude", "gebäude", "buildings")]
+    if not parents:
+        return 0
+    parent = parents[0]
+    building_layers = {l.Index: l for l in new_layers if l.ParentLayerId == parent.Id}
+    if not building_layers:
+        return 0
+    kind_layers = {}
+    moved = 0
+    for o in new_objs:
+        src = building_layers.get(o.Attributes.LayerIndex)
+        if src is None:
+            continue
+        kind = _kind_of(doc, o)
+        if kind not in kind_layers:
+            existing = doc.Layers.FindByFullPath(parent.FullPath + "::" + kind, -1)
+            if existing >= 0:
+                kind_layers[kind] = existing
+            else:
+                layer = Rhino.DocObjects.Layer()
+                layer.Name = kind
+                layer.ParentLayerId = parent.Id
+                layer.Color = src.Color
+                kind_layers[kind] = doc.Layers.Add(layer)
+        attrs = o.Attributes
+        attrs.LayerIndex = kind_layers[kind]
+        attrs.SetUserString("gml_id", src.Name or "")
+        doc.Objects.ModifyAttributes(o, attrs, True)
+        moved += 1
+    for idx, layer in building_layers.items():
+        if not doc.Objects.FindByLayer(layer):
+            doc.Layers.Delete(idx, True)
+    return moved
+
+
 def import_export(doc, p, export_id, folder=None):
     job = api(p, f"/api/exports/{export_id}")
     if job.get("state") != "done":
@@ -364,6 +435,8 @@ def import_export(doc, p, export_id, folder=None):
             attrs.SetUserString("attribution", prov.get("attribution", ""))
         doc.Objects.ModifyAttributes(o, attrs, True)
 
+    _flatten_building_layers(doc, new_objs, new_layers)
+    new_layers = [l for l in doc.Layers if l.Id not in layers_before and not l.IsDeleted]
     relinked = _relink_textures(doc, mats_before, folder, glbs)
 
     doc.Strings.SetString("gisloader:export_id", export_id)
@@ -398,7 +471,7 @@ def import_export(doc, p, export_id, folder=None):
     state()["last"] = {
         "name": name,
         "objects": len(new_objs),
-        "layers": [l.Name for l in new_layers],
+        "layers": [l.FullPath for l in new_layers],
         "relinked": relinked,
         "folder": folder,
         "units": str(doc.ModelUnitSystem),
@@ -548,38 +621,44 @@ def _text(cls, text):
     return c
 
 
+PASSWORD_DUMMY = "••••••••"
+
+
 class GisloaderForm(forms.Form):
     def __init__(self):
         super().__init__()
         self.p = load_prefs()
         self.exports = []
         self.Title = f"gisloader {VERSION}"
-        self.Padding = drawing.Padding(10)
+        self.Padding = drawing.Padding(12)
         self.Resizable = True
-        self.Topmost = False
+        self.MinimumSize = drawing.Size(640, 0)
 
         # pythonnet in Rhino 8 kennt keine Eigenschaften im Konstruktor: erst erzeugen, dann setzen.
         self.server = _text(forms.TextBox, self.p["server"])
         self.email = _text(forms.TextBox, self.p["email"])
         self.password = forms.PasswordBox()
-        self.btn_login = _text(forms.Button, "Anmelden")
-        self.btn_logout = _text(forms.Button, "Abmelden")
-        self.btn_refresh = _text(forms.Button, "Exporte aktualisieren")
-        self.btn_web = _text(forms.Button, "gisloader im Browser")
+        if self.p.get("token"):
+            self.password.Text = PASSWORD_DUMMY
+        self.btn_login = _text(forms.Button, "🔑 Anmelden")
+        self.btn_logout = _text(forms.Button, "⏏ Abmelden")
+        self.btn_refresh = _text(forms.Button, "⟳ Exporte aktualisieren")
+        self.btn_web = _text(forms.Button, "🌐 gisloader im Browser")
         self.period = forms.DropDown()
         for _, label in PERIODS:
             self.period.Items.Add(label)
         ids = [k for k, _ in PERIODS]
         self.period.SelectedIndex = ids.index(self.p.get("period", "month")) if self.p.get("period") in ids else 1
         self.list = forms.DropDown()
-        self.btn_import = _text(forms.Button, "Importieren")
+        self.btn_import = _text(forms.Button, "⬇ Importieren")
         self.folder = _text(forms.TextBox, self.p.get("folder") or DEFAULT_FOLDER)
-        self.btn_folder = _text(forms.Button, "…")
+        self.btn_folder = _text(forms.Button, "📁 Wählen …")
         self.ask = _text(forms.CheckBox, "Beim Import fragen")
         self.ask.Checked = bool(self.p.get("ask_folder", True))
         self.bridge = forms.CheckBox()
         self.bridge.Checked = bool(self.p.get("bridge", True))
         self.lbl_status = forms.Label()
+        self.lbl_status.Wrap = forms.WrapMode.Word
 
         self.btn_login.Click += self.on_login
         self.btn_logout.Click += self.on_logout
@@ -592,22 +671,41 @@ class GisloaderForm(forms.Form):
         self.bridge.CheckedChanged += self.on_bridge
         self.Closed += self.on_closed
 
-        lay = forms.DynamicLayout()
-        lay.Spacing = drawing.Size(6, 6)
-        lay.AddRow(_text(forms.Label, "Server"), self.server)
-        lay.AddRow(_text(forms.Label, "E-Mail"), self.email)
-        lay.AddRow(_text(forms.Label, "Passwort"), self.password)
-        buttons = forms.DynamicLayout()
-        buttons.Spacing = drawing.Size(6, 0)
-        buttons.AddRow(self.btn_login, self.btn_logout, self.btn_refresh, self.btn_web)
-        lay.AddRow(None, buttons)
-        lay.AddRow(self.period, self.list, self.btn_import)
-        folder_row = forms.DynamicLayout()
-        folder_row.Spacing = drawing.Size(6, 0)
-        folder_row.AddRow(self.folder, self.btn_folder, self.ask)
-        lay.AddRow(_text(forms.Label, "Ordner"), folder_row)
-        lay.AddRow(self.bridge, self.lbl_status)
-        self.Content = lay
+        def hstack(*controls):
+            st = forms.StackLayout()
+            st.Orientation = forms.Orientation.Horizontal
+            st.Spacing = 6
+            st.VerticalContentAlignment = forms.VerticalAlignment.Center
+            for c in controls:
+                st.Items.Add(forms.StackLayoutItem(c))
+            return st
+
+        def row(label, control):
+            cells = [forms.TableCell(_text(forms.Label, label) if label else None), forms.TableCell(control, True)]
+            return forms.TableRow(*cells)
+
+        def split(left, right):
+            """Zweispaltig: links dehnbar, rechts natürliche Breite."""
+            t = forms.TableLayout()
+            t.Spacing = drawing.Size(6, 0)
+            t.Rows.Add(forms.TableRow(forms.TableCell(left, True), forms.TableCell(right)))
+            return t
+
+        table = forms.TableLayout()
+        table.Spacing = drawing.Size(8, 6)
+        table.Rows.Add(row("Server", self.server))
+        table.Rows.Add(row("E-Mail", self.email))
+        table.Rows.Add(row("Passwort", self.password))
+        table.Rows.Add(row(None, hstack(self.btn_login, self.btn_logout, self.btn_refresh, self.btn_web)))
+        table.Rows.Add(row("Zeitraum", split(self.period, None)))
+        table.Rows.Add(row("Export", split(self.list, self.btn_import)))
+        table.Rows.Add(row("Ordner", split(self.folder, hstack(self.btn_folder, self.ask))))
+        table.Rows.Add(row("Brücke", self.bridge))
+        table.Rows.Add(row(None, self.lbl_status))
+        spacer = forms.TableRow()
+        spacer.ScaleHeight = True  # fängt zusätzliche Höhe ab, damit die Felder nicht wachsen
+        table.Rows.Add(spacer)
+        self.Content = table
         self.update_bridge_label()
         self.status("Angemeldet" if self.p.get("token") else "Nicht angemeldet")
         if self.p.get("token"):
@@ -622,7 +720,7 @@ class GisloaderForm(forms.Form):
 
     def update_bridge_label(self):
         port = state()["port"] or self.p.get("port", BRIDGE_PORT)
-        self.bridge.Text = f"Brücke 127.0.0.1:{port} für „An Rhino senden“"
+        self.bridge.Text = f"127.0.0.1:{port} für „An Rhino senden“ aus der Web-App"
 
     def sync_prefs(self):
         self.p["server"] = self.server.Text.strip() or DEFAULT_SERVER
@@ -649,9 +747,14 @@ class GisloaderForm(forms.Form):
 
     def on_login(self, sender, e):
         self.sync_prefs()
+        pw = self.password.Text
+        if pw == PASSWORD_DUMMY and self.p.get("token"):
+            self.status("Bereits angemeldet als " + (self.p.get("email") or ""))
+            self.refresh()
+            return
         try:
-            who = login(self.p, self.password.Text)
-            self.password.Text = ""
+            who = login(self.p, pw)
+            self.password.Text = PASSWORD_DUMMY
             self.status("Angemeldet als " + who)
             self.refresh()
         except Exception as ex:
@@ -660,6 +763,7 @@ class GisloaderForm(forms.Form):
     def on_logout(self, sender, e):
         self.p["token"] = ""
         save_prefs(self.p)
+        self.password.Text = ""
         self.list.Items.Clear()
         self.status("Abgemeldet")
 

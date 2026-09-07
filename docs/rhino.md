@@ -47,6 +47,15 @@ food4Rhino als App hochladen.
   Export-ID dorthin, der Import läuft im UI-Thread von Rhino; die Brücke
   bleibt aktiv, auch wenn das Fenster geschlossen ist.
 
+## Ebenen
+
+Jeder Export bekommt eine Ebene „gisloader · Ort“. Darunter liegen die Ebenen
+des Importers (Nutzung mit Unterebenen, Flurstücke, Bauwerke) und „Gebaeude“
+mit je einer Ebene pro Bauteilart (Dach, Wand, Boden, Grundriss) statt einer
+Ebene je Gebäude; die gml:id jedes Gebäudes steht als Benutzertext `gml_id`
+am Objekt. Ist das Plugin angemeldet, zeigt das Passwortfeld Platzhalter;
+„Anmelden“ prüft dann nur die Sitzung.
+
 ## Georeferenz
 
 - Rhino ist Z-up und dreht glTF (Y-up) beim Import: X = Ost, Y = Nord,

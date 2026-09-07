@@ -62,6 +62,8 @@ Texturen des photorealistischen Meshes bleiben eingebettet.
 
 ## Störungen
 
+- Fehler beim Öffnen des Fensters landen in `~/.gisloader/rhino.log` und in
+  der Rhino-Kommandozeile.
 - „CERTIFICATE_VERIFY_FAILED“: Das Skript nutzt certifi (falls vorhanden) und
   die Systemzertifikate; unter Windows liest Python den Zertifikatspeicher.
 - Brücke „aus“ trotz Häkchen: alle Ports 47820–47829 belegt oder eine

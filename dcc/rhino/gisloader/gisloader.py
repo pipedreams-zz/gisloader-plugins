@@ -33,7 +33,7 @@ import System
 import Eto.Drawing as drawing
 import Eto.Forms as forms
 
-VERSION = "0.1.8"
+VERSION = "0.1.9"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Rhino nimmt den ersten freien Port ab 47820 (bis +9); Blender ab 47800, Cinema 4D ab 47810.
 BRIDGE_PORT = 47820
@@ -436,7 +436,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/ping"):
-            self._json(200, {"app": "rhino", "version": str(Rhino.RhinoApp.Version), "addon": VERSION, "port": state()["port"], "last": state()["last"]})
+            self._json(200, {"app": "rhino", "version": str(Rhino.RhinoApp.Version), "addon": VERSION, "port": state()["port"], "form": state()["form"] is not None, "last": state()["last"]})
         else:
             self._json(404, {"error": "unbekannt"})
 
@@ -538,6 +538,12 @@ def drain_queue():
 # ── Fenster (Eto, nicht-modal) ──────────────────────────────────────────
 
 
+def _text(cls, text):
+    c = cls()
+    c.Text = text
+    return c
+
+
 class GisloaderForm(forms.Form):
     def __init__(self):
         super().__init__()
@@ -548,25 +554,28 @@ class GisloaderForm(forms.Form):
         self.Resizable = True
         self.Topmost = False
 
-        self.server = forms.TextBox(Text=self.p["server"])
-        self.email = forms.TextBox(Text=self.p["email"])
+        # pythonnet in Rhino 8 kennt keine Eigenschaften im Konstruktor: erst erzeugen, dann setzen.
+        self.server = _text(forms.TextBox, self.p["server"])
+        self.email = _text(forms.TextBox, self.p["email"])
         self.password = forms.PasswordBox()
-        self.btn_login = forms.Button(Text="Anmelden")
-        self.btn_logout = forms.Button(Text="Abmelden")
-        self.btn_refresh = forms.Button(Text="Exporte aktualisieren")
-        self.btn_web = forms.Button(Text="gisloader im Browser")
+        self.btn_login = _text(forms.Button, "Anmelden")
+        self.btn_logout = _text(forms.Button, "Abmelden")
+        self.btn_refresh = _text(forms.Button, "Exporte aktualisieren")
+        self.btn_web = _text(forms.Button, "gisloader im Browser")
         self.period = forms.DropDown()
         for _, label in PERIODS:
             self.period.Items.Add(label)
         ids = [k for k, _ in PERIODS]
         self.period.SelectedIndex = ids.index(self.p.get("period", "month")) if self.p.get("period") in ids else 1
         self.list = forms.DropDown()
-        self.btn_import = forms.Button(Text="Importieren")
-        self.folder = forms.TextBox(Text=self.p.get("folder") or DEFAULT_FOLDER)
-        self.btn_folder = forms.Button(Text="…")
-        self.ask = forms.CheckBox(Text="Beim Import fragen", Checked=bool(self.p.get("ask_folder", True)))
-        self.bridge = forms.CheckBox(Checked=bool(self.p.get("bridge", True)))
-        self.lbl_status = forms.Label(Text="")
+        self.btn_import = _text(forms.Button, "Importieren")
+        self.folder = _text(forms.TextBox, self.p.get("folder") or DEFAULT_FOLDER)
+        self.btn_folder = _text(forms.Button, "…")
+        self.ask = _text(forms.CheckBox, "Beim Import fragen")
+        self.ask.Checked = bool(self.p.get("ask_folder", True))
+        self.bridge = forms.CheckBox()
+        self.bridge.Checked = bool(self.p.get("bridge", True))
+        self.lbl_status = forms.Label()
 
         self.btn_login.Click += self.on_login
         self.btn_logout.Click += self.on_logout
@@ -579,13 +588,20 @@ class GisloaderForm(forms.Form):
         self.bridge.CheckedChanged += self.on_bridge
         self.Closed += self.on_closed
 
-        lay = forms.DynamicLayout(Spacing=drawing.Size(6, 6))
-        lay.AddRow(forms.Label(Text="Server"), self.server)
-        lay.AddRow(forms.Label(Text="E-Mail"), self.email)
-        lay.AddRow(forms.Label(Text="Passwort"), self.password)
-        lay.AddRow(None, forms.TableLayout(Spacing=drawing.Size(6, 0), Rows=[forms.TableRow(self.btn_login, self.btn_logout, self.btn_refresh, self.btn_web)]))
+        lay = forms.DynamicLayout()
+        lay.Spacing = drawing.Size(6, 6)
+        lay.AddRow(_text(forms.Label, "Server"), self.server)
+        lay.AddRow(_text(forms.Label, "E-Mail"), self.email)
+        lay.AddRow(_text(forms.Label, "Passwort"), self.password)
+        buttons = forms.DynamicLayout()
+        buttons.Spacing = drawing.Size(6, 0)
+        buttons.AddRow(self.btn_login, self.btn_logout, self.btn_refresh, self.btn_web)
+        lay.AddRow(None, buttons)
         lay.AddRow(self.period, self.list, self.btn_import)
-        lay.AddRow(forms.Label(Text="Ordner"), forms.TableLayout(Spacing=drawing.Size(6, 0), Rows=[forms.TableRow(forms.TableCell(self.folder, True), self.btn_folder, self.ask)]))
+        folder_row = forms.DynamicLayout()
+        folder_row.Spacing = drawing.Size(6, 0)
+        folder_row.AddRow(self.folder, self.btn_folder, self.ask)
+        lay.AddRow(_text(forms.Label, "Ordner"), folder_row)
         lay.AddRow(self.bridge, self.lbl_status)
         self.Content = lay
         self.update_bridge_label()
@@ -678,6 +694,20 @@ class GisloaderForm(forms.Form):
         state()["form"] = None
 
 
+def log_error(where):
+    """Traceback in die Rhino-Kommandozeile und nach ~/.gisloader/rhino.log (Fehlersuche)."""
+    import traceback
+
+    text = f"[gisloader] {where}:\n{traceback.format_exc()}"
+    print(text)
+    try:
+        os.makedirs(os.path.dirname(prefs_path()), exist_ok=True)
+        with open(os.path.join(os.path.dirname(prefs_path()), "rhino.log"), "a", encoding="utf-8") as f:
+            f.write(datetime.datetime.now().isoformat(timespec="seconds") + " " + text + "\n")
+    except Exception:
+        pass
+
+
 def main():
     st = state()
     p = load_prefs()
@@ -689,10 +719,13 @@ def main():
             return
         except Exception:
             st["form"] = None
-    form = GisloaderForm()
-    form.Owner = Rhino.UI.RhinoEtoApp.MainWindow
-    form.Show()
-    st["form"] = form
+    try:
+        form = GisloaderForm()
+        form.Owner = Rhino.UI.RhinoEtoApp.MainWindow
+        form.Show()
+        st["form"] = form
+    except Exception:
+        log_error("Fenster konnte nicht geöffnet werden")
 
 
 if __name__ == "__main__":

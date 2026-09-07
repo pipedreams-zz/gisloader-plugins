@@ -1,0 +1,14 @@
+schema_version = "1.0.0"
+id = "gisloader_blender"
+version = "0.1.2"
+name = "gisloader"
+tagline = "Exporte von gisloader abholen und mit Georeferenz importieren"
+maintainer = "gisloader"
+type = "add-on"
+blender_version_min = "4.2.0"
+license = ["SPDX:MIT"]
+tags = ["Import-Export"]
+# Der lokale Listener (Brücke) bindet nur an 127.0.0.1.
+[permissions]
+network = "Exporte vom gisloader-Server laden; lokale Brücke auf 127.0.0.1"
+files = "GLB-Dateien im Temp-Ordner ablegen"

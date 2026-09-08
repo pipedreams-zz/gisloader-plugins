@@ -146,5 +146,10 @@ Archicad senden“ aus dem normalen Browser wird später darauf aufsetzen.
 - Beim Austausch des Bundles muss Archicad beendet sein; ein laufendes
   Archicad hält die alte Fassung im Speicher.
 
-Offen: Element-ID mit gml:id, lokale Brücke, Signierung/Notarisierung,
-Windows-Build (Windows-DevKit `API.Development.Kit.WIN.28.*` nötig).
+- Windows (8. September 2026): Der CI-Workflow baute `gisloader.apx`
+  (PE32+ x64, Exporte `GetExportedFuncAddrs`/`SetImportedFuncAddrs`) ohne
+  Anpassungen am Code; Datei unter `dcc/archicad/dist/win/`. Ein Test in
+  Archicad 28 unter Windows steht noch aus.
+
+Offen: Test der Windows-Fassung, Element-ID mit gml:id, lokale Brücke,
+Signierung/Notarisierung (macOS) bzw. Code-Signatur (Windows).

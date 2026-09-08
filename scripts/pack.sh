@@ -8,4 +8,5 @@ rm -f dist/*.zip
 (cd dcc/cinema4d && zip -qr ../../dist/gisloader-cinema4d.zip gisloader -x '*/__pycache__/*')
 (cd dcc && zip -qr ../dist/gisloader-rhino.zip rhino -x '*/__pycache__/*' 'rhino/build/*' 'rhino/gisloader.rhproj')
 cp dcc/rhino/dist/*.yak dist/ 2>/dev/null || true
+(cd dcc/archicad/dist && zip -qr ../../../dist/gisloader-archicad.zip gisloader.bundle) 2>/dev/null || true
 ls -l dist

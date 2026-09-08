@@ -1,6 +1,6 @@
 # gisloader-Plugins
 
-Plugins für **Blender**, **Cinema 4D 2025/2026** und **Rhino 8**, die fertige Exporte von
+Plugins für **Blender**, **Cinema 4D 2025/2026**, **Rhino 8** und **Archicad 28**, die fertige Exporte von
 [gisloader](https://gisloader.ampsrvr.xyz) direkt ins 3D-Programm holen: mit
 Georeferenz (CRS und Ursprung), Ebenen als Collections beziehungsweise
 Null-Objekte und einer lokalen Brücke für den Knopf „An Blender senden“ /
@@ -22,6 +22,7 @@ der Web-App.
 - [Blender](docs/blender.md)
 - [Cinema 4D](docs/cinema4d.md)
 - [Rhino](docs/rhino.md)
+- [Archicad](docs/archicad.md)
 
 ## Herkunft
 

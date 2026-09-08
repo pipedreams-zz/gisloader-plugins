@@ -12,7 +12,7 @@ an der Szene in der Form von BlenderGIS (`crs`, `crsx`, `crsy`).
 bl_info = {
     "name": "gisloader",
     "author": "gisloader",
-    "version": (0, 1, 11),
+    "version": (0, 1, 12),
     "blender": (3, 6, 0),
     "location": "3D-Ansicht › Seitenleiste (N) › gisloader",
     "description": "Exporte von gisloader abholen und mit Georeferenz importieren",
@@ -35,7 +35,7 @@ import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 
 ADDON_ID = __package__ or __name__
-ADDON_VERSION = "0.1.11"
+ADDON_VERSION = "0.1.12"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Blender-Instanzen nehmen den ersten freien Port ab 47800 (bis +9); Cinema 4D ab 47810.
 BRIDGE_PORT_SPAN = 10

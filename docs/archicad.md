@@ -44,9 +44,58 @@ Ergebnis: `build/Release/gisloader.bundle`. Zum Testen den Ordner nach
 laden; für die Weitergabe signieren (Developer ID Application) und notarisieren.
 Windows-Build (`.apx`) braucht Visual Studio 2019 auf einem Windows-Rechner.
 
+## Installation
+
+1. Zip laden: auf der [Plugin-Seite](/plugins) oder direkt
+   `https://<server>/dcc/gisloader-archicad.zip`; darin `gisloader.bundle`.
+2. Bundle nach `/Applications/Graphisoft/Archicad 28/Add-Ons/` kopieren (oder
+   im Add-On-Manager hinzufügen) und Archicad starten. Menü **gisloader** →
+   „gisloader-Palette“.
+3. Das Bundle ist bisher nur ad hoc signiert; auf einem fremden Mac verlangt
+   Gatekeeper eine Freigabe (Rechtsklick → Öffnen) oder eine signierte und
+   notarisierte Fassung.
+
+## JSON-Befehl
+
+Das Add-on registriert `gisloader.ImportFile` an der Archicad-JSON-Schnittstelle
+(Port 19723): Import einer GLB vom Dateisystem, mit Name und Georeferenz.
+
+```bash
+curl -s -X POST http://127.0.0.1:19723 -H 'content-type: application/json' -d '{
+  "command": "API.ExecuteAddOnCommand",
+  "parameters": {
+    "addOnCommandId": { "commandNamespace": "gisloader", "commandName": "ImportFile" },
+    "addOnCommandParameters": {
+      "path": "/pfad/zum/export_model.glb",
+      "name": "Kiel, Rathausplatz",
+      "georef": "25832;573400;6019615;7;10.1284;54.3191"
+    }
+  }
+}'
+```
+
+Antwort: `{"ok": true, "message": "254 Morph(s) angelegt, 0 übersprungen, Ebenen: 3"}`.
+Damit lässt sich der Import skripten und testen; die lokale Brücke „An
+Archicad senden“ aus dem normalen Browser wird später darauf aufsetzen.
+
 ## Stand
 
-Skelett vom 8. September 2026, noch nicht kompiliert (Xcode/CMake fehlten).
-Offen: Serveradresse in den Einstellungen, Oberflächen (Materialien) je
-Ebenenart statt Standardmaterial, Linien der Flurstücke als Polylinien, lokale
-Brücke „An Archicad senden“ aus dem normalen Browser, Windows-Build.
+- 8. September 2026: Build mit Xcode 26.6 und CMake 4.4 erfolgreich
+     (universelles Bundle). Archicad 28 (Build 7006) lädt das Add-on; ein
+     Import des Kieler Testexports über den JSON-Befehl legte 254 Morphs auf den
+     Ebenen Gelände, Gebäude und Nutzung an, der Projektstandort steht auf
+     54,319° N / 10,128° O mit Rechts-/Hochwert des Ursprungs (geprüft über
+     Tapir). Maßstab und Achsen stimmen (Gelände 200 m, Dächer bei 25,9 m).
+- Ladefehler „weder Add-On noch Veraltetes“: trat auf, solange die Info.plist
+  `CFBundleVersion`/`CFBundleShortVersionString` mit „0.1.12“ trug und die
+  Ressourcen ohne BOM und mit Umlauten vorlagen; mit `CFBundleVersion` 1.0,
+  Kurzversion als Text und BOM/ASCII in den `.grc` lädt Archicad das Bundle.
+  Versionsnummer steht in `CFBundleGetInfoString` und `Version.hpp`.
+- Das Add-on protokolliert Laden und Fehler unter
+  `~/Library/Logs/gisloader-archicad.log`.
+
+Offen: Palette mit eingebetteter Web-App im Betrieb prüfen (Anmeldung im
+eingebetteten Browser, Knopf „In Archicad importieren“), Serveradresse in den
+Einstellungen, Oberflächen je Ebenenart statt Standardmaterial, Flurstücke als
+Polylinien, Element-ID mit gml:id, lokale Brücke, Signierung/Notarisierung,
+Windows-Build.

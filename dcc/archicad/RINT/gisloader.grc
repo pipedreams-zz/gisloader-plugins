@@ -1,4 +1,4 @@
-/* *****************************************************************************
+﻿/* *****************************************************************************
 // gisloader für Archicad: lokalisierbare Ressourcen
 // ****************************************************************************/
 
@@ -11,7 +11,7 @@
 /* [   ] */		"gisloader"
 /* [   ] */		"gisloader"
 /* [  1] */			"gisloader-Palette^ES^EE^EI^ED^EW^E3^EL"
-/* [  2] */			"gisloader im Browser öffnen^ES^EE^EI^ED^EW^E3^EL"
+/* [  2] */			"gisloader im Browser oeffnen^ES^EE^EI^ED^EW^E3^EL"
 }
 
 /* --- Andockbare Palette mit eingebetteter Web-App -------------------------- */

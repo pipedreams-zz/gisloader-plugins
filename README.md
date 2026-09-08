@@ -16,6 +16,12 @@ der Web-App.
 | --------- | -------------- | ------------------------------------------- | ----------- |
 | Blender   | `dcc/blender`  | Blender 3.6 oder neuer (Erweiterung ab 4.2) | 47800–47809 |
 | Cinema 4D | `dcc/cinema4d` | Cinema 4D 2025 oder 2026                    | 47810–47819 |
+| Rhino 8   | `dcc/rhino`    | Rhino 8 (Python 3), Paket `.yak`            | 47820–47829 |
+| Archicad  | `dcc/archicad` | Archicad 28 (macOS, Windows)                | Palette     |
+
+Jedes Plugin zählt seine Version eigenständig; Releases tragen ein Datum und
+nennen die enthaltenen Versionen, Änderungen stehen in
+[docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ## Anleitungen
 
@@ -23,6 +29,7 @@ der Web-App.
 - [Cinema 4D](docs/cinema4d.md)
 - [Rhino](docs/rhino.md)
 - [Archicad](docs/archicad.md)
+- [Versionshistorie](docs/CHANGELOG.md)
 
 ## Herkunft
 

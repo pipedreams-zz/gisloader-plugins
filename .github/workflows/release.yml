@@ -1,9 +1,10 @@
 name: Release
 
-# Bei einem Tag v<version> beide Plugins packen und als Release anhängen.
+# Bei einem Tag (Datum wie 2026.09.09 oder v<x>) alle Plugins packen und als
+# Release anhängen; die Notiz nennt die Version jedes Plugins.
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "20*"]
   workflow_dispatch:
 
 permissions:
@@ -16,11 +17,11 @@ jobs:
       - uses: actions/checkout@v5
       - run: bash scripts/pack.sh
       - name: Release anlegen
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
             --title "gisloader-Plugins $GITHUB_REF_NAME" \
-            --notes "Blender (dcc/blender), Cinema 4D (dcc/cinema4d) und Rhino 8 (dcc/rhino). Anleitungen unter docs/." \
+            --notes-file dist/RELEASE.md \
             dist/*.zip dist/*.yak

@@ -1,5 +1,7 @@
 #include "PaletteCommands.hpp"
 
+#include <string>
+
 #include "ObjectState.hpp"
 
 #include "GisloaderPalette.hpp"
@@ -41,6 +43,42 @@ GS::ObjectState ShowPaletteCommand::Execute (const GS::ObjectState& parameters, 
 	}
 	GS::ObjectState response;
 	response.Add ("visible", GisloaderPalette::HasInstance () && GisloaderPalette::GetInstance ().IsVisible ());
+	return response;
+}
+
+GS::Optional<GS::UniString> SetServerCommand::GetInputParametersSchema () const
+{
+	return R"json(
+		{
+			"type": "object",
+			"properties": { "url": { "type": "string" } },
+			"additionalProperties": false,
+			"required": ["url"]
+		}
+	)json";
+}
+
+GS::Optional<GS::UniString> SetServerCommand::GetResponseSchema () const
+{
+	return R"json(
+		{
+			"type": "object",
+			"properties": { "ok": { "type": "boolean" }, "server": { "type": "string" } },
+			"additionalProperties": false,
+			"required": ["ok", "server"]
+		}
+	)json";
+}
+
+GS::ObjectState SetServerCommand::Execute (const GS::ObjectState& parameters, GS::ProcessControl&) const
+{
+	GS::UniString url;
+	parameters.Get ("url", url);
+	const bool ok = GisloaderSetServerUrl (std::string (url.ToCStr (0, MaxUSize, CC_UTF8).Get ()));
+	if (ok && GisloaderPalette::HasInstance ()) GisloaderPalette::GetInstance ().ReloadWebApp ();
+	GS::ObjectState response;
+	response.Add ("ok", ok);
+	response.Add ("server", GisloaderServerUrl ());
 	return response;
 }
 

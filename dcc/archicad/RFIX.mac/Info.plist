@@ -11,7 +11,7 @@
 	<key>CFBundleExecutable</key>
 	<string>gisloader</string>
 	<key>CFBundleGetInfoString</key>
-	<string>gisloader 0.1.12, Copyright © 2026 Alexander Pfeiffer.</string>
+	<string>gisloader 0.1.13, Copyright © 2026 Alexander Pfeiffer.</string>
 	<key>CFBundleShortVersionString</key>
 	<string>gisloader</string>
 	<key>CFBundlePackageType</key>

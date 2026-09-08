@@ -1,6 +1,8 @@
 #include "GlbReader.hpp"
 
+#include <climits>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <stdexcept>
@@ -123,37 +125,78 @@ GlbModel ReadGlb (const std::vector<uint8_t>& bytes)
 			for (size_t p = 0; p < mesh["primitives"].Size (); ++p) {
 				const JsonValue& prim = mesh["primitives"][p];
 				const long mode = prim["mode"].IntOr (4);
-				if (mode != 4) continue;  // nur Dreiecke; Linien (Flurstücke) kommen später als Polylinien
+				if (mode != 4 && mode != 1 && mode != 3) continue;  // Dreiecke, LINES, LINE_STRIP
 				if (!prim["attributes"].Has ("POSITION") || bin == nullptr) continue;
-				GlbMesh out;
-				out.nodeName = name;
-				out.meshName = mesh["name"].StringOr (name);
-				out.materialName = gltf["materials"][static_cast<size_t> (prim["material"].IntOr (-1))]["name"].StringOr ("");
+				const JsonValue& mat = gltf["materials"][static_cast<size_t> (prim["material"].IntOr (-1))];
+				const std::string materialName = mat["name"].StringOr ("");
+				double color[3] = {1.0, 1.0, 1.0};  // glTF-Vorgabe
+				const JsonValue& pbr = mat["pbrMetallicRoughness"];
+				if (pbr.Has ("baseColorFactor"))
+					for (size_t k = 0; k < 3; ++k) color[k] = pbr["baseColorFactor"][k].NumberOr (color[k]);
+				const bool textured = pbr.Has ("baseColorTexture");
 				AccessorView pos = ViewOf (gltf, bin, binLen, prim["attributes"]["POSITION"].IntOr (-1));
 				if (pos.componentType != 5126 || pos.components != 3) throw std::runtime_error ("GLB: POSITION muss float vec3 sein");
-				out.positions.resize (pos.count * 3);
+				std::vector<double> positions (pos.count * 3);
 				for (size_t i = 0; i < pos.count; ++i) {
 					float f[3];
 					std::memcpy (f, pos.data + i * pos.stride, 12);
 					double x = f[0], y = f[1], z = f[2];
 					world.Apply (x, y, z);
-					out.positions[i * 3] = x; out.positions[i * 3 + 1] = y; out.positions[i * 3 + 2] = z;
+					positions[i * 3] = x; positions[i * 3 + 1] = y; positions[i * 3 + 2] = z;
 				}
+				std::vector<uint32_t> indices;
 				if (prim.Has ("indices")) {
 					AccessorView idx = ViewOf (gltf, bin, binLen, prim["indices"].IntOr (-1));
-					out.indices.resize (idx.count);
+					indices.resize (idx.count);
 					for (size_t i = 0; i < idx.count; ++i) {
 						const uint8_t* at = idx.data + i * idx.stride;
-						if (idx.componentType == 5125) { uint32_t v; std::memcpy (&v, at, 4); out.indices[i] = v; }
-						else if (idx.componentType == 5123) { uint16_t v; std::memcpy (&v, at, 2); out.indices[i] = v; }
-						else out.indices[i] = *at;
+						if (idx.componentType == 5125) { uint32_t v; std::memcpy (&v, at, 4); indices[i] = v; }
+						else if (idx.componentType == 5123) { uint16_t v; std::memcpy (&v, at, 2); indices[i] = v; }
+						else indices[i] = *at;
 					}
 				} else {
-					out.indices.resize (pos.count);
-					for (size_t i = 0; i < pos.count; ++i) out.indices[i] = static_cast<uint32_t> (i);
+					indices.resize (pos.count);
+					for (size_t i = 0; i < pos.count; ++i) indices[i] = static_cast<uint32_t> (i);
 				}
-				out.indices.resize (out.indices.size () - out.indices.size () % 3);
-				if (!out.indices.empty ()) model.meshes.push_back (std::move (out));
+				if (mode == 4) {
+					GlbMesh out;
+					out.nodeName = name;
+					out.meshName = mesh["name"].StringOr (name);
+					out.materialName = materialName;
+					std::memcpy (out.color, color, sizeof color);
+					out.textured = textured;
+					out.positions = std::move (positions);
+					out.indices = std::move (indices);
+					out.indices.resize (out.indices.size () - out.indices.size () % 3);
+					if (!out.indices.empty ()) model.meshes.push_back (std::move (out));
+					continue;
+				}
+				// Linien: Segmente zu Linienzügen verketten (LINES) bzw. direkt übernehmen (LINE_STRIP).
+				GlbLine line;
+				line.nodeName = name;
+				line.materialName = materialName;
+				std::memcpy (line.color, color, sizeof color);
+				auto point = [&] (uint32_t i) { return std::vector<double> {positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]}; };
+				std::vector<double> current;
+				uint32_t last = UINT32_MAX;
+				if (mode == 3) {
+					for (uint32_t i : indices) { auto pt = point (i); current.insert (current.end (), pt.begin (), pt.end ()); }
+					if (current.size () >= 6) line.polylines.push_back (std::move (current));
+				} else {
+					for (size_t i = 0; i + 1 < indices.size (); i += 2) {
+						const uint32_t a = indices[i], b = indices[i + 1];
+						if (a >= pos.count || b >= pos.count) continue;
+						if (a != last) {
+							if (current.size () >= 6) line.polylines.push_back (current);
+							current.clear ();
+							auto pa = point (a); current.insert (current.end (), pa.begin (), pa.end ());
+						}
+						auto pb = point (b); current.insert (current.end (), pb.begin (), pb.end ());
+						last = b;
+					}
+					if (current.size () >= 6) line.polylines.push_back (std::move (current));
+				}
+				if (!line.polylines.empty ()) model.lines.push_back (std::move (line));
 			}
 		}
 		for (size_t c = 0; c < node["children"].Size (); ++c)

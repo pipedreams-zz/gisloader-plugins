@@ -19,10 +19,23 @@ Projektstandort bekommt die Georeferenz des Ausschnitts.
   Knopf „In Archicad importieren“. Sie lädt die GLB-Dateien mit ihrer Sitzung,
   übergibt sie als Base64, dazu die Georeferenz (`epsg;ox;oy;oz;lon;lat`).
 - Das Add-on liest die GLB selbst (`GlbReader`: Knoten, Transformationen,
-  Dreiecksnetze, Materialnamen), legt je Netz ein Morph-Element an
-  (`ACAPI_Body_*`, rückgängig machbar) und verteilt sie auf Ebenen:
-  „gisloader Gelände“, „gisloader Gebäude“, „gisloader Nutzung“,
-  „gisloader Flurstücke“, „gisloader Mesh“. Die gml:id wird Element-ID.
+  Dreiecksnetze, Linien, Materialnamen und -farben), legt je Netz ein
+  Morph-Element an (`ACAPI_Body_*`, rückgängig machbar) und verteilt sie auf
+  Ebenen: „gisloader Gelände“, „gisloader Gebäude“, „gisloader Bauwerke“,
+  „gisloader Nutzung“, „gisloader Flurstücke“, „gisloader Höhenlinien“,
+  „gisloader Bäume“, „gisloader Mesh“.
+- Oberflächen: je glTF-Material entsteht eine Archicad-Oberfläche mit der
+  Farbe des Exports („gisloader Dach“, „gisloader Wand“, „gisloader Nutzung
+  Verkehr“ usw.); texturierte Netze (Gelände, Mesh) bekommen ein Grün-Grau,
+  weil Archicad-Oberflächen keine Textur aus der GLB übernehmen. Vorhandene
+  Oberflächen gleichen Namens werden wiederverwendet, Farbänderungen im
+  Projekt bleiben also erhalten.
+- Linien der GLB (Flurstücksgrenzen, Höhenlinien) werden Polylinien im
+  Grundriss auf der passenden Ebene.
+- Serveradresse: Vorgabe `https://gisloader.ampsrvr.xyz`; abweichend in
+  `~/.gisloader/archicad.json` (Windows `%USERPROFILE%\.gisloader\archicad.json`)
+  als `{"server": "https://…"}`, setzbar über den JSON-Befehl
+  `gisloader.SetServer` (`url`), der die Palette neu lädt.
 - Achsen: glTF ist Y-up, Archicad Z-up: X = x, Y = −z, Z = y, Meter.
   Der Projektursprung ist der Ursprung des Exports (Südwest-Ecke).
 - Georeferenz: Projektstandort (Länge, Breite, Höhe) und Georeferenzdaten
@@ -58,7 +71,8 @@ Windows-Build (`.apx`) braucht Visual Studio 2019 auf einem Windows-Rechner.
 ## JSON-Befehle
 
 Das Add-on registriert an der Archicad-JSON-Schnittstelle (Port 19723)
-`gisloader.ShowPalette` (`action`: show, hide, reload) und
+`gisloader.ShowPalette` (`action`: show, hide, reload),
+`gisloader.SetServer` (`url`: Serveradresse in die Konfigurationsdatei) und
 `gisloader.ImportFile`: Import einer GLB vom Dateisystem, mit Name und
 Georeferenz. Ein Testbuild (`cmake -DGISLOADER_DEBUG=ON`) hat zusätzlich
 `gisloader.DebugExecuteJS`, das JavaScript im eingebetteten Browser ausführt;
@@ -78,7 +92,7 @@ curl -s -X POST http://127.0.0.1:19723 -H 'content-type: application/json' -d '{
 }'
 ```
 
-Antwort: `{"ok": true, "message": "254 Morph(s) angelegt, 0 übersprungen, Ebenen: 3"}`.
+Antwort: `{"ok": true, "message": "254 Morph(s), 78 Polylinie(n) angelegt, 0 übersprungen, Ebenen: 5, Oberflächen: 6"}`.
 Damit lässt sich der Import skripten und testen; die lokale Brücke „An
 Archicad senden“ aus dem normalen Browser wird später darauf aufsetzen.
 
@@ -104,6 +118,12 @@ Archicad senden“ aus dem normalen Browser wird später darauf aufsetzen.
   Projektstandort steht auf 50,774° N / 6,083° O (Test per DebugExecuteJS,
   Prüfung über Tapir).
 
-Offen: Serveradresse in den Einstellungen, Oberflächen je Ebenenart statt Standardmaterial, Flurstücke als
-Polylinien, Element-ID mit gml:id, lokale Brücke, Signierung/Notarisierung,
-Windows-Build.
+- Version 0.1.13 (8. September 2026): Oberflächen je Material mit
+  Exportfarbe, Flurstücksgrenzen als Polylinien, Serveradresse per
+  Konfigurationsdatei. Kiel-Test: 254 Morphs, 78 Polylinien, 5 Ebenen,
+  6 Oberflächen (Farben über die JSON-Schnittstelle geprüft).
+- Beim Austausch des Bundles muss Archicad beendet sein; ein laufendes
+  Archicad hält die alte Fassung im Speicher.
+
+Offen: Element-ID mit gml:id, lokale Brücke, Signierung/Notarisierung,
+Windows-Build (Windows-DevKit `API.Development.Kit.WIN.28.*` nötig).

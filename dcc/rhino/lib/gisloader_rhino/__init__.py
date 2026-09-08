@@ -33,7 +33,7 @@ import System
 import Eto.Drawing as drawing
 import Eto.Forms as forms
 
-VERSION = "0.1.12"
+VERSION = "0.1.13"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Rhino nimmt den ersten freien Port ab 47820 (bis +9); Blender ab 47800, Cinema 4D ab 47810.
 BRIDGE_PORT = 47820

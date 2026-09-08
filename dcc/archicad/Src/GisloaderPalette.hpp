@@ -8,6 +8,8 @@
 #include "DGModule.hpp"
 #include "DGBrowser.hpp"
 
+#include <string>
+
 #include "Importer.hpp"
 
 #define GisloaderPaletteResId 32500
@@ -50,5 +52,7 @@ protected:
 	static GS::Ref<GisloaderPalette> instance;
 };
 
-/** Serveradresse der Web-App (später aus den Einstellungen). */
+/** Serveradresse der Web-App: Konfigurationsdatei oder Vorgabe. */
 GS::UniString GisloaderServerUrl ();
+/** Serveradresse in die Konfigurationsdatei schreiben. */
+bool GisloaderSetServerUrl (const std::string& url);

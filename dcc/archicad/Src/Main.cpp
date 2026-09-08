@@ -71,6 +71,9 @@ GSErrCode Initialize (void)
 	err = ACAPI_AddOnAddOnCommunication_InstallAddOnCommandHandler (GS::NewOwned<ShowPaletteCommand> ());
 	GisloaderLog ("Initialize: ShowPalette-Befehl " + std::to_string (err));
 	if (err != NoError) return err;
+	err = ACAPI_AddOnAddOnCommunication_InstallAddOnCommandHandler (GS::NewOwned<SetServerCommand> ());
+	GisloaderLog ("Initialize: SetServer-Befehl " + std::to_string (err));
+	if (err != NoError) return err;
 #if defined (GISLOADER_DEBUG)
 	err = ACAPI_AddOnAddOnCommunication_InstallAddOnCommandHandler (GS::NewOwned<DebugExecuteJsCommand> ());
 	GisloaderLog ("Initialize: DebugExecuteJS-Befehl (Testbuild) " + std::to_string (err));

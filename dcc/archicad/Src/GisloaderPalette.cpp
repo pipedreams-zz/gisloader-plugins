@@ -3,17 +3,66 @@
 #include <cstdlib>
 #include <string>
 
+#include <cstdio>
+
 #include "Base64.hpp"
 #include "Log.hpp"
+#include "MiniJson.hpp"
 #include "Version.hpp"
 
 static const GS::Guid paletteGuid ("{7C2E4B1A-5D3F-4E86-9A0B-2F6C1D8E4A57}");
 
 GS::Ref<GisloaderPalette> GisloaderPalette::instance;
 
+/** Konfigurationsdatei ~/.gisloader/archicad.json (macOS) bzw. %USERPROFILE%\\.gisloader\\archicad.json. */
+static std::string ConfigPath ()
+{
+#if defined (macintosh)
+	const char* home = std::getenv ("HOME");
+	return std::string (home ? home : "/tmp") + "/.gisloader/archicad.json";
+#else
+	const char* home = std::getenv ("USERPROFILE");
+	return std::string (home ? home : ".") + "\\.gisloader\\archicad.json";
+#endif
+}
+
 GS::UniString GisloaderServerUrl ()
 {
-	return GS::UniString (GISLOADER_DEFAULT_SERVER);
+	std::string url = GISLOADER_DEFAULT_SERVER;
+	if (FILE* f = std::fopen (ConfigPath ().c_str (), "rb")) {
+		std::string text;
+		char buf[4096];
+		size_t n;
+		while ((n = std::fread (buf, 1, sizeof buf, f)) > 0) text.append (buf, n);
+		std::fclose (f);
+		try {
+			const gisloader::JsonValue cfg = gisloader::JsonParser::Parse (text);
+			const std::string s = cfg["server"].StringOr ("");
+			if (s.rfind ("http", 0) == 0) url = s;
+		} catch (...) {
+			GisloaderLog ("Konfiguration unlesbar: " + ConfigPath ());
+		}
+	}
+	while (!url.empty () && url.back () == '/') url.pop_back ();
+	return GS::UniString (url.c_str (), CC_UTF8);
+}
+
+bool GisloaderSetServerUrl (const std::string& url)
+{
+	const std::string path = ConfigPath ();
+	const std::string dir = path.substr (0, path.find_last_of ("/\\"));
+#if defined (macintosh)
+	std::system (("mkdir -p '" + dir + "'").c_str ());
+#else
+	std::system (("mkdir \"" + dir + "\" 2>nul").c_str ());
+#endif
+	FILE* f = std::fopen (path.c_str (), "wb");
+	if (!f) return false;
+	std::string esc;
+	for (char c : url) { if (c == '"' || c == '\\') esc += '\\'; esc += c; }
+	std::fprintf (f, "{\n  \"server\": \"%s\"\n}\n", esc.c_str ());
+	std::fclose (f);
+	return true;
 }
 
 namespace {

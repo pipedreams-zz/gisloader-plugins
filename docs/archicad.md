@@ -57,6 +57,27 @@ Ergebnis: `build/Release/gisloader.bundle`. Zum Testen den Ordner nach
 laden; für die Weitergabe signieren (Developer ID Application) und notarisieren.
 Windows-Build (`.apx`) braucht Visual Studio 2019 auf einem Windows-Rechner.
 
+## Bauen (Windows)
+
+Der Workflow `.github/workflows/archicad-windows.yml` baut bei Änderungen unter
+`dcc/archicad/` auf einem Windows-Runner: Er lädt das Windows-DevKit 28.4001
+aus dem öffentlichen Graphisoft-Release (`GRAPHISOFT/archicad-api-devkit`),
+konfiguriert mit Visual Studio 2022 und Toolset v142 (Vorgabe des DevKits für
+Archicad 28) und legt `gisloader.apx` als Artefakt ab. Für die Auslieferung
+wird die Datei nach `dcc/archicad/dist/win/gisloader.apx` übernommen und mit
+dem nächsten Plugin-Tag eingecheckt; die Windows-Ressourcen liegen in
+`RFIX.win/gisloader.rc2`. Lokal auf Windows entsprechend:
+
+```bat
+cmake -S dcc\archicad -B dcc\archicad\build -G "Visual Studio 17 2022" -A x64 -T v142 -DAC_API_DEVKIT_DIR=C:\Pfad\API.Development.Kit.WIN.28.4001
+cmake --build dcc\archicad\build --config Release
+```
+
+Installation unter Windows: `gisloader.apx` in den Ordner
+`C:\Program Files\Graphisoft\Archicad 28\Add-Ons\` legen (oder über den
+Add-On-Manager laden); Protokoll unter `%TEMP%\gisloader-archicad.log`,
+Konfiguration in `%USERPROFILE%\.gisloader\archicad.json`.
+
 ## Installation
 
 1. Zip laden: auf der [Plugin-Seite](/plugins) oder direkt

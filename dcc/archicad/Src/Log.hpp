@@ -10,8 +10,8 @@
 
 inline void GisloaderLog (const std::string& line)
 {
-	const char* home = std::getenv ("HOME");
 #if defined (macintosh)
+	const char* home = std::getenv ("HOME");
 	const std::string path = std::string (home ? home : "/tmp") + "/Library/Logs/gisloader-archicad.log";
 #else
 	const char* tmp = std::getenv ("TEMP");

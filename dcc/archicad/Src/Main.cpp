@@ -6,6 +6,10 @@
 
 #include <cstdlib>
 #include <string>
+#if defined (GS_WIN)
+#include <windows.h>
+#include <shellapi.h>
+#endif
 
 #include "GisloaderPalette.hpp"
 #include "ImportCommand.hpp"
@@ -29,7 +33,7 @@ static void OpenInBrowser ()
 #if defined (macintosh)
 	std::system (("open '" + url + "'").c_str ());
 #else
-	std::system (("start \"\" \"" + url + "\"").c_str ());
+	ShellExecuteA (nullptr, "open", url.c_str (), nullptr, nullptr, SW_SHOWNORMAL);
 #endif
 }
 

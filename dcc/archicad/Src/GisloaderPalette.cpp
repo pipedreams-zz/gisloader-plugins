@@ -4,6 +4,8 @@
 #include <string>
 
 #include <cstdio>
+#include <filesystem>
+#include <system_error>
 
 #include "Base64.hpp"
 #include "Log.hpp"
@@ -51,11 +53,8 @@ bool GisloaderSetServerUrl (const std::string& url)
 {
 	const std::string path = ConfigPath ();
 	const std::string dir = path.substr (0, path.find_last_of ("/\\"));
-#if defined (macintosh)
-	std::system (("mkdir -p '" + dir + "'").c_str ());
-#else
-	std::system (("mkdir \"" + dir + "\" 2>nul").c_str ());
-#endif
+	std::error_code ec;
+	std::filesystem::create_directories (dir, ec);
 	FILE* f = std::fopen (path.c_str (), "wb");
 	if (!f) return false;
 	std::string esc;

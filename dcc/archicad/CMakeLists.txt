@@ -207,6 +207,11 @@ else ()
 endif ()
 
 SetCompilerOptions (AddOn)
+# Testbuild: zusätzlicher JSON-Befehl gisloader.DebugExecuteJS (nie im ausgelieferten Bundle).
+option (GISLOADER_DEBUG "Debug-Befehle einbauen" OFF)
+if (GISLOADER_DEBUG)
+	target_compile_definitions (AddOn PRIVATE GISLOADER_DEBUG=1)
+endif ()
 add_dependencies (AddOn AddOnResources)
 
 get_filename_component (APIDevKitModulesDir "${AC_API_DEVKIT_DIR}/Support/Modules" ABSOLUTE)

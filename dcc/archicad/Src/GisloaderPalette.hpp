@@ -26,6 +26,10 @@ public:
 	void Show ();
 	void Hide ();
 	void ReloadWebApp ();
+	/** Palette anlegen (falls nötig) und zeigen. */
+	static void EnsureShown ();
+	/** JavaScript im eingebetteten Browser ausführen (Testbuild). */
+	bool ExecuteJs (const GS::UniString& code);
 
 	virtual ~GisloaderPalette ();
 

@@ -4,41 +4,21 @@
 #include "APIEnvir.h"
 #include "ACAPinc.h"
 
-#include <cstdio>
 #include <cstdlib>
-#include <ctime>
 #include <string>
 
 #include "GisloaderPalette.hpp"
 #include "ImportCommand.hpp"
+#include "Log.hpp"
+#include "PaletteCommands.hpp"
 #include "Version.hpp"
-
-/** Protokoll für die Fehlersuche: ~/Library/Logs/gisloader-archicad.log (macOS) bzw. %TEMP% (Windows). */
-static void LogLine (const std::string& line)
-{
-	const char* home = std::getenv ("HOME");
-#if defined (macintosh)
-	const std::string path = std::string (home ? home : "/tmp") + "/Library/Logs/gisloader-archicad.log";
-#else
-	const char* tmp = std::getenv ("TEMP");
-	const std::string path = std::string (tmp ? tmp : ".") + "\\gisloader-archicad.log";
-#endif
-	if (FILE* f = std::fopen (path.c_str (), "a")) {
-		std::time_t now = std::time (nullptr);
-		char stamp[32];
-		std::strftime (stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", std::localtime (&now));
-		std::fprintf (f, "%s [gisloader %s] %s\n", stamp, GISLOADER_ADDON_VERSION, line.c_str ());
-		std::fclose (f);
-	}
-}
 
 static void ShowOrHidePalette ()
 {
 	if (GisloaderPalette::HasInstance () && GisloaderPalette::GetInstance ().IsVisible ()) {
 		GisloaderPalette::GetInstance ().Hide ();
 	} else {
-		if (!GisloaderPalette::HasInstance ()) GisloaderPalette::CreateInstance ();
-		GisloaderPalette::GetInstance ().Show ();
+		GisloaderPalette::EnsureShown ();
 	}
 }
 
@@ -68,28 +48,36 @@ API_AddonType CheckEnvironment (API_EnvirParams* envir)
 {
 	RSGetIndString (&envir->addOnInfo.name, 32000, 1, ACAPI_GetOwnResModule ());
 	RSGetIndString (&envir->addOnInfo.description, 32000, 2, ACAPI_GetOwnResModule ());
-	LogLine ("CheckEnvironment: Name=" + std::string (envir->addOnInfo.name.ToCStr (0, MaxUSize, CC_UTF8).Get ()));
+	GisloaderLog ("CheckEnvironment: Name=" + std::string (envir->addOnInfo.name.ToCStr (0, MaxUSize, CC_UTF8).Get ()));
 	return APIAddon_Preload;
 }
 
 GSErrCode RegisterInterface (void)
 {
 	GSErrCode err = ACAPI_MenuItem_RegisterMenu (GisloaderMenuResId, 0, MenuCode_UserDef, MenuFlag_Default);
-	LogLine ("RegisterInterface: Menü " + std::to_string (err));
+	GisloaderLog ("RegisterInterface: Menü " + std::to_string (err));
 	return err;
 }
 
 GSErrCode Initialize (void)
 {
 	GSErrCode err = ACAPI_MenuItem_InstallMenuHandler (GisloaderMenuResId, MenuCommandHandler);
-	LogLine ("Initialize: Menühandler " + std::to_string (err));
+	GisloaderLog ("Initialize: Menühandler " + std::to_string (err));
 	if (err != NoError) return err;
 	// JSON-Befehl gisloader.ImportFile (Archicad-JSON-Schnittstelle, ExecuteAddOnCommand).
 	err = ACAPI_AddOnAddOnCommunication_InstallAddOnCommandHandler (GS::NewOwned<ImportFileCommand> ());
-	LogLine ("Initialize: ImportFile-Befehl " + std::to_string (err));
+	GisloaderLog ("Initialize: ImportFile-Befehl " + std::to_string (err));
 	if (err != NoError) return err;
+	err = ACAPI_AddOnAddOnCommunication_InstallAddOnCommandHandler (GS::NewOwned<ShowPaletteCommand> ());
+	GisloaderLog ("Initialize: ShowPalette-Befehl " + std::to_string (err));
+	if (err != NoError) return err;
+#if defined (GISLOADER_DEBUG)
+	err = ACAPI_AddOnAddOnCommunication_InstallAddOnCommandHandler (GS::NewOwned<DebugExecuteJsCommand> ());
+	GisloaderLog ("Initialize: DebugExecuteJS-Befehl (Testbuild) " + std::to_string (err));
+	if (err != NoError) return err;
+#endif
 	err = GisloaderPalette::RegisterPaletteControlCallBack ();
-	LogLine ("Initialize: Palette " + std::to_string (err));
+	GisloaderLog ("Initialize: Palette " + std::to_string (err));
 	return err;
 }
 

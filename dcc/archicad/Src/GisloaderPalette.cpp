@@ -4,6 +4,7 @@
 #include <string>
 
 #include "Base64.hpp"
+#include "Log.hpp"
 #include "Version.hpp"
 
 static const GS::Guid paletteGuid ("{7C2E4B1A-5D3F-4E86-9A0B-2F6C1D8E4A57}");
@@ -102,6 +103,17 @@ void GisloaderPalette::ReloadWebApp ()
 	browser.LoadURL (GisloaderServerUrl () + "/?embed=archicad");
 }
 
+void GisloaderPalette::EnsureShown ()
+{
+	if (!HasInstance ()) CreateInstance ();
+	GetInstance ().Show ();
+}
+
+bool GisloaderPalette::ExecuteJs (const GS::UniString& code)
+{
+	return browser.ExecuteJS (code);
+}
+
 void GisloaderPalette::RegisterHostObject ()
 {
 	// window.gisloaderHost in der Web-App; jede Funktion nimmt genau einen String.
@@ -111,6 +123,11 @@ void GisloaderPalette::RegisterHostObject ()
 		API_ServerApplicationInfo info;
 		ACAPI_AddOnIdentification_Application (&info);
 		return JsString ("archicad;" + std::to_string (info.mainVersion) + "." + std::to_string (info.releaseVersion) + ";" GISLOADER_ADDON_VERSION);
+	}));
+
+	host->AddItem (new JS::Function ("log", [] (GS::Ref<JS::Base> param) {
+		GisloaderLog ("web: " + Utf8Of (param));
+		return JsString ("ok");
 	}));
 
 	host->AddItem (new JS::Function ("beginImport", [this] (GS::Ref<JS::Base> param) {

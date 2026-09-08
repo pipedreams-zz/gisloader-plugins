@@ -8,6 +8,8 @@
 	<string>de.alexander-pfeiffer.gisloader</string>
 	<key>CFBundleName</key>
 	<string>gisloader</string>
+	<key>CFBundleExecutable</key>
+	<string>gisloader</string>
 	<key>CFBundleGetInfoString</key>
 	<string>gisloader 0.1.12, Copyright © 2026 Alexander Pfeiffer.</string>
 	<key>CFBundleShortVersionString</key>
@@ -19,7 +21,7 @@
 	<key>CFBundleVersion</key>
 	<string>0.1.12</string>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>German</string>
+	<string>English</string>
 	<key>CFBundleIconFile</key>
 	<string>ArchiCADPlugin.icns</string>
 	<key>LSMinimumSystemVersion</key>

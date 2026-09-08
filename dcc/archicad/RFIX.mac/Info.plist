@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleIdentifier</key>
+	<string>de.alexander-pfeiffer.gisloader</string>
+	<key>CFBundleName</key>
+	<string>gisloader</string>
+	<key>CFBundleGetInfoString</key>
+	<string>gisloader 0.1.12, Copyright © 2026 Alexander Pfeiffer.</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.12</string>
+	<key>CFBundlePackageType</key>
+	<string>.APX</string>
+	<key>CFBundleSignature</key>
+	<string>GSAP</string>
+	<key>CFBundleVersion</key>
+	<string>0.1.12</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>German</string>
+	<key>CFBundleIconFile</key>
+	<string>ArchiCADPlugin.icns</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>LSRequiresCarbon</key>
+	<true/>
+</dict>
+</plist>

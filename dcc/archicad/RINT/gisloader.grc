@@ -1,0 +1,25 @@
+/* *****************************************************************************
+// gisloader für Archicad: lokalisierbare Ressourcen
+// ****************************************************************************/
+
+'STR#' 32000 "Add-on Name and Description" {
+/* [  1] */		"gisloader"
+/* [  2] */		"3D-Kontextmodelle aus offenen Geodaten (gisloader) als Morph-Elemente mit Georeferenz importieren."
+}
+
+'STR#' 32500 "Strings for the Menu" {
+/* [   ] */		"gisloader"
+/* [   ] */		"gisloader"
+/* [  1] */			"gisloader-Palette^ES^EE^EI^ED^EW^E3^EL"
+/* [  2] */			"gisloader im Browser öffnen^ES^EE^EI^ED^EW^E3^EL"
+}
+
+/* --- Andockbare Palette mit eingebetteter Web-App -------------------------- */
+
+'GDLG'  32500    Palette | topCaption | close | grow   0   0  560  720  "gisloader"  {
+/* [  1] */ Browser			0   0  560  720
+}
+
+'DLGH'  32500  DLG_32500_gisloader_Palette {
+1	"gisloader"		Browser_0
+}

@@ -55,10 +55,14 @@ Windows-Build (`.apx`) braucht Visual Studio 2019 auf einem Windows-Rechner.
    Gatekeeper eine Freigabe (Rechtsklick → Öffnen) oder eine signierte und
    notarisierte Fassung.
 
-## JSON-Befehl
+## JSON-Befehle
 
-Das Add-on registriert `gisloader.ImportFile` an der Archicad-JSON-Schnittstelle
-(Port 19723): Import einer GLB vom Dateisystem, mit Name und Georeferenz.
+Das Add-on registriert an der Archicad-JSON-Schnittstelle (Port 19723)
+`gisloader.ShowPalette` (`action`: show, hide, reload) und
+`gisloader.ImportFile`: Import einer GLB vom Dateisystem, mit Name und
+Georeferenz. Ein Testbuild (`cmake -DGISLOADER_DEBUG=ON`) hat zusätzlich
+`gisloader.DebugExecuteJS`, das JavaScript im eingebetteten Browser ausführt;
+im ausgelieferten Bundle fehlt dieser Befehl.
 
 ```bash
 curl -s -X POST http://127.0.0.1:19723 -H 'content-type: application/json' -d '{
@@ -94,8 +98,12 @@ Archicad senden“ aus dem normalen Browser wird später darauf aufsetzen.
 - Das Add-on protokolliert Laden und Fehler unter
   `~/Library/Logs/gisloader-archicad.log`.
 
-Offen: Palette mit eingebetteter Web-App im Betrieb prüfen (Anmeldung im
-eingebetteten Browser, Knopf „In Archicad importieren“), Serveradresse in den
-Einstellungen, Oberflächen je Ebenenart statt Standardmaterial, Flurstücke als
+- Palette geprüft (8. September 2026): Die Web-App läuft im eingebetteten
+  Browser mit `window.gisloaderHost`; Kontoanlage, Export „Aachen, Dom“ (200 m)
+  und die Übergabe über die Brücke ergaben 60 Morphs auf vier Ebenen, der
+  Projektstandort steht auf 50,774° N / 6,083° O (Test per DebugExecuteJS,
+  Prüfung über Tapir).
+
+Offen: Serveradresse in den Einstellungen, Oberflächen je Ebenenart statt Standardmaterial, Flurstücke als
 Polylinien, Element-ID mit gml:id, lokale Brücke, Signierung/Notarisierung,
 Windows-Build.

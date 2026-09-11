@@ -88,12 +88,12 @@ Antwort: `{"ok": true, "message": "254 Morph(s), 78 Polylinie(n) angelegt, 0 üb
 ## Stand
 
 - 11. September 2026, 0.1.14: Windows-`.apx` war kein gültiges Add-on („weder ein
-  Add-On noch Veraltetes“): `RFIX.win/gisloader.rc2` band die aus den `.grc`
-  erzeugten `gisloader.grc.rc2`/`gisloaderFix.grc.rc2` nicht ein, die `.apx`
-  enthielt nur Icon und Manifest, kein `MDID`. Jetzt wie im DevKit-Beispiel per
-  `#include`; Prüfung: die `.rsrc`-Sektion der `.apx` muss benannte
-  Ressourcentypen (`MDID`, `GDLG`, `STR#` …) enthalten, nicht nur Typ 3/14/24.
-  Mac-Bundle nur mit neuer Versionsnummer.
+      Add-On noch Veraltetes“): `RFIX.win/gisloader.rc2` band die aus den `.grc`
+      erzeugten `gisloader.grc.rc2`/`gisloaderFix.grc.rc2` nicht ein, die `.apx`
+      enthielt nur Icon und Manifest, kein `MDID`. Jetzt wie im DevKit-Beispiel per
+      `#include`; Prüfung: die `.rsrc`-Sektion der `.apx` muss benannte
+      Ressourcentypen (`MDID`, `GDLG`, `STR#` …) enthalten, nicht nur Typ 3/14/24.
+      Mac-Bundle nur mit neuer Versionsnummer.
 - 8. September 2026, 0.1.13: Mac-Build mit Xcode 26.6 und CMake 4.4;
      Kiel-Test 254 Morphs, 78 Polylinien, 5 Ebenen, 6 Oberflächen; Palette und
      Import aus der Web-App geprüft (Aachen, Dom: 60 Morphs, Standort

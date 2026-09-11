@@ -33,7 +33,7 @@ import System
 import Eto.Drawing as drawing
 import Eto.Forms as forms
 
-VERSION = "0.1.13"
+VERSION = "0.1.14"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Rhino nimmt den ersten freien Port ab 47820 (bis +9); Blender ab 47800, Cinema 4D ab 47810.
 BRIDGE_PORT = 47820
@@ -70,6 +70,7 @@ def load_prefs():
         "period": "month",
         "folder": DEFAULT_FOLDER,
         "ask_folder": True,
+        "account": "all",
     }
     try:
         with open(prefs_path(), "r", encoding="utf-8") as f:
@@ -164,9 +165,27 @@ def in_period(created_iso, period):
     return t >= start
 
 
-def list_exports(p, period="all"):
+def session_ok(p):
+    """Gilt die gespeicherte Sitzung noch? /api/me antwortet sonst mit user = null."""
+    if not p.get("token"):
+        return False
+    try:
+        return bool(api(p, "/api/me").get("user"))
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return False
+        raise
+
+
+def list_accounts(p):
+    """Konten, deren Exporte das Konto sehen darf: persönlich und alle Teams."""
+    return api(p, "/api/exports/accounts")
+
+
+def list_exports(p, period="all", account="all"):
+    """Exporte im Zeitraum; account = "all" (persönlich und Teams), Konto-ID oder "" (aktives Konto)."""
     out = []
-    for j in api(p, "/api/exports"):
+    for j in api(p, "/api/exports" + (f"?account={account}" if account else "")):
         if not in_period(j.get("createdAt", ""), period):
             continue
         b = j.get("request", {}).get("bbox", {})
@@ -178,9 +197,38 @@ def list_exports(p, period="all"):
                 "created": j.get("createdAt", "")[:16].replace("T", " "),
                 "state": j.get("state", ""),
                 "area_km2": area,
+                "creator": j.get("creator", ""),
+                "account": j.get("accountName", ""),
             }
         )
     return out
+
+
+def export_label(ex, show_account=True):
+    mark = "✓" if ex["state"] == "done" else "…"
+    parts = [f"{mark} {ex['name']}", f"{ex['area_km2']:.3f} km²", ex["created"]]
+    if show_account and ex.get("account") and ex["account"] != "Persönlich":
+        parts.append(ex["account"])
+    if ex.get("creator"):
+        parts.append("von " + ex["creator"])
+    return " · ".join(parts)
+
+
+def set_last(export_id, ok, message):
+    """Ergebnis des letzten Brücken-Imports für /ping (die Web-App zeigt es an) und das Protokoll."""
+    state()["last"] = {"exportId": export_id, "ok": ok, "message": message, "at": datetime.datetime.now().isoformat(timespec="seconds")}
+    log_line(("Import fertig: " if ok else "Import fehlgeschlagen: ") + message)
+
+
+def log_line(text):
+    text = "[gisloader] " + text
+    print(text)
+    try:
+        os.makedirs(os.path.dirname(prefs_path()), exist_ok=True)
+        with open(os.path.join(os.path.dirname(prefs_path()), "rhino.log"), "a", encoding="utf-8") as f:
+            f.write(datetime.datetime.now().isoformat(timespec="seconds") + " " + text + "\n")
+    except Exception:
+        pass
 
 
 # ── Speicherordner ──────────────────────────────────────────────────────
@@ -513,7 +561,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/ping"):
-            self._json(200, {"app": "rhino", "version": str(Rhino.RhinoApp.Version), "addon": VERSION, "port": state()["port"], "form": state()["form"] is not None, "last": state()["last"]})
+            self._json(200, {"app": "rhino", "version": str(Rhino.RhinoApp.Version), "addon": VERSION, "port": state()["port"], "form": state()["form"] is not None, "busy": bool(state().get("busy")), "last": state()["last"]})
         else:
             self._json(404, {"error": "unbekannt"})
 
@@ -528,6 +576,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
         if not data.get("exportId"):
             return self._json(400, {"error": "exportId fehlt"})
         state()["queue"].put(data)
+        state()["busy"] = True
+        log_line(f"Brücke: Import {data.get('exportId')} von {data.get('server')} angefordert")
         Rhino.RhinoApp.InvokeOnUiThread(System.Action(drain_queue))
         self._json(202, {"queued": True})
 
@@ -589,27 +639,36 @@ def drain_queue():
     st = state()
     p = load_prefs()
     doc = Rhino.RhinoDoc.ActiveDoc
-    while True:
-        try:
-            data = st["queue"].get_nowait()
-        except queue.Empty:
-            return
-        server = data.get("server")
-        if server and server.rstrip("/") != p["server"].rstrip("/"):
-            print(f"[gisloader] Import abgelehnt: Server {server} ≠ {p['server']}")
-            continue
-        folder = choose_folder(p, st["form"])
-        if folder is None:
-            print("[gisloader] Import abgebrochen (kein Ordner gewählt)")
-            continue
-        try:
-            name, n, relinked, out = import_export(doc, p, data["exportId"], folder)
-            msg = f"{n} Objekte in „gisloader · {name}“, {relinked} Textur(en), Dateien unter {out}"
-            print("[gisloader]", msg)
-            if st["form"] is not None:
-                st["form"].status(msg)
-        except Exception as e:
-            print("[gisloader] Import über Brücke fehlgeschlagen:", describe_error(e))
+    try:
+        while True:
+            try:
+                data = st["queue"].get_nowait()
+            except queue.Empty:
+                return
+            export_id = data.get("exportId", "")
+            server = data.get("server")
+            if server and server.rstrip("/") != p["server"].rstrip("/"):
+                set_last(export_id, False, f"abgelehnt: Server {server} ≠ {p['server']} (Server im Plugin prüfen)")
+                continue
+            try:
+                folder = choose_folder(p, st["form"])
+                if folder is None:
+                    set_last(export_id, False, "abgebrochen (kein Ordner gewählt)")
+                    continue
+                if st["form"] is not None:
+                    st["form"].status("Import über die Brücke läuft …")
+                name, n, relinked, out = import_export(doc, p, export_id, folder)
+                msg = f"{n} Objekte in „gisloader · {name}“, {relinked} Textur(en), Dateien unter {out}"
+                set_last(export_id, True, msg)
+                if st["form"] is not None:
+                    st["form"].status(msg)
+            except Exception as e:
+                set_last(export_id, False, describe_error(e))
+                if st["form"] is not None:
+                    st["form"].status("Brücke, Fehler: " + describe_error(e))
+                Rhino.RhinoApp.WriteLine("gisloader: Import über die Brücke fehlgeschlagen: " + describe_error(e))
+    finally:
+        st["busy"] = False
 
 
 # ── Fenster (Eto, nicht-modal) ──────────────────────────────────────────
@@ -629,6 +688,7 @@ class GisloaderForm(forms.Form):
         super().__init__()
         self.p = load_prefs()
         self.exports = []
+        self.accounts = []
         self.Title = f"gisloader {VERSION}"
         self.Padding = drawing.Padding(12)
         self.Resizable = True
@@ -649,6 +709,9 @@ class GisloaderForm(forms.Form):
             self.period.Items.Add(label)
         ids = [k for k, _ in PERIODS]
         self.period.SelectedIndex = ids.index(self.p.get("period", "month")) if self.p.get("period") in ids else 1
+        self.account = forms.DropDown()
+        self.account.Items.Add("Alle Konten")
+        self.account.SelectedIndex = 0
         self.list = forms.DropDown()
         self.btn_import = _text(forms.Button, "⬇ Importieren")
         self.folder = _text(forms.TextBox, self.p.get("folder") or DEFAULT_FOLDER)
@@ -665,6 +728,7 @@ class GisloaderForm(forms.Form):
         self.btn_refresh.Click += lambda s, e: self.refresh()
         self.btn_web.Click += lambda s, e: webbrowser.open(self.p["server"].rstrip("/") + "/")
         self.period.SelectedIndexChanged += lambda s, e: (self.sync_prefs(), self.refresh())
+        self.account.SelectedIndexChanged += lambda s, e: (self.sync_prefs(), self.refresh())
         self.btn_import.Click += self.on_import
         self.btn_folder.Click += self.on_folder
         self.ask.CheckedChanged += lambda s, e: self.sync_prefs()
@@ -697,7 +761,7 @@ class GisloaderForm(forms.Form):
         table.Rows.Add(row("E-Mail", self.email))
         table.Rows.Add(row("Passwort", self.password))
         table.Rows.Add(row(None, hstack(self.btn_login, self.btn_logout, self.btn_refresh, self.btn_web)))
-        table.Rows.Add(row("Zeitraum", split(self.period, None)))
+        table.Rows.Add(row("Konto", split(self.account, hstack(_text(forms.Label, "Zeitraum"), self.period))))
         table.Rows.Add(row("Export", split(self.list, self.btn_import)))
         table.Rows.Add(row("Ordner", split(self.folder, hstack(self.btn_folder, self.ask))))
         table.Rows.Add(row("Brücke", self.bridge))
@@ -709,10 +773,44 @@ class GisloaderForm(forms.Form):
         self.update_bridge_label()
         self.status("Angemeldet" if self.p.get("token") else "Nicht angemeldet")
         if self.p.get("token"):
-            self.refresh()
+            self.check_session_and_refresh()
 
     def status(self, text):
         self.lbl_status.Text = text
+
+    def account_id(self):
+        i = self.account.SelectedIndex
+        return self.accounts[i - 1]["id"] if 1 <= i <= len(self.accounts) else "all"
+
+    def fill_accounts(self):
+        try:
+            self.accounts = list_accounts(self.p)
+        except Exception as e:
+            self.accounts = []
+            self.status("Konten: " + describe_error(e))
+        self.account.Items.Clear()
+        self.account.Items.Add("Alle Konten")
+        for a in self.accounts:
+            label = a["name"] if a.get("kind") == "user" else f"Team {a['name']}"
+            self.account.Items.Add(label + (" (aktiv in der Web-App)" if a.get("active") else ""))
+        wanted = self.p.get("account", "all")
+        self.account.SelectedIndex = next((i + 1 for i, a in enumerate(self.accounts) if a["id"] == wanted), 0)
+
+    def check_session_and_refresh(self):
+        """Sitzung prüfen (abgelaufen liefert sonst stumm eine leere Liste), Konten und Liste laden."""
+        try:
+            ok = session_ok(self.p)
+        except Exception as e:
+            self.status("Server nicht erreichbar: " + describe_error(e))
+            return
+        if not ok:
+            self.p["token"] = ""
+            save_prefs(self.p)
+            self.password.Text = ""
+            self.status("Sitzung abgelaufen, bitte neu anmelden")
+            return
+        self.fill_accounts()
+        self.refresh()
 
     def period_id(self):
         i = self.period.SelectedIndex
@@ -729,21 +827,27 @@ class GisloaderForm(forms.Form):
         self.p["folder"] = self.folder.Text.strip() or DEFAULT_FOLDER
         self.p["ask_folder"] = bool(self.ask.Checked)
         self.p["bridge"] = bool(self.bridge.Checked)
+        self.p["account"] = self.account_id()
         save_prefs(self.p)
 
     def refresh(self):
+        if not self.p.get("token"):
+            self.status("Nicht angemeldet")
+            return
+        if not self.accounts:
+            self.fill_accounts()
         try:
-            self.exports = list_exports(self.p, self.period_id())
+            self.exports = list_exports(self.p, self.period_id(), self.account_id())
         except Exception as e:
             self.status("Liste: " + describe_error(e))
             return
         self.list.Items.Clear()
         for ex in self.exports:
-            mark = "✓" if ex["state"] == "done" else "…"
-            self.list.Items.Add(f"{mark} {ex['name']} · {ex['area_km2']:.3f} km² · {ex['created']}")
+            self.list.Items.Add(export_label(ex, show_account=self.account_id() == "all"))
         if self.exports:
             self.list.SelectedIndex = 0
-        self.status(f"{len(self.exports)} Exporte im Zeitraum")
+        where = "in allen Konten" if self.account_id() == "all" else "im Konto"
+        self.status(f"{len(self.exports)} Exporte {where} im Zeitraum" + ("" if self.exports else " – Zeitraum oder Konto wechseln"))
 
     def on_login(self, sender, e):
         self.sync_prefs()
@@ -756,6 +860,7 @@ class GisloaderForm(forms.Form):
             who = login(self.p, pw)
             self.password.Text = PASSWORD_DUMMY
             self.status("Angemeldet als " + who)
+            self.fill_accounts()
             self.refresh()
         except Exception as ex:
             self.status("Anmeldung: " + describe_error(ex))
@@ -765,6 +870,10 @@ class GisloaderForm(forms.Form):
         save_prefs(self.p)
         self.password.Text = ""
         self.list.Items.Clear()
+        self.accounts = []
+        self.account.Items.Clear()
+        self.account.Items.Add("Alle Konten")
+        self.account.SelectedIndex = 0
         self.status("Abgemeldet")
 
     def on_folder(self, sender, e):

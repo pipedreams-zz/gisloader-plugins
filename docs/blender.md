@@ -7,6 +7,13 @@ ist, an der Szene in der Form von BlenderGIS (`crs`, `crsx`, `crsy`).
 
 ## Benutzung
 
+- Konto: „Alle Konten“ (Vorgabe) zeigt persönliche Exporte und die aller
+  Teams, in denen du Mitglied bist, mit Team und Ersteller je Zeile; daneben
+  der Zeitraum. „Exporte aktualisieren“ prüft die Sitzung („Sitzung
+  abgelaufen“ heißt neu anmelden) und lädt die Liste.
+- „An Blender senden“ in der Web-App (Exportpanel und Exportliste des Kontos)
+  meldet das Ergebnis des Imports zurück in die Web-App.
+
 - 3D-Ansicht › Seitenleiste (N) › Reiter „gisloader“: „Exporte aktualisieren“
   lädt die Liste des Kontos, „Importieren“ holt den markierten Export.
 - Zeitraum über der Liste: diese Woche, dieser Monat (Vorgabe), dieses Jahr,

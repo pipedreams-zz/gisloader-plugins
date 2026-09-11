@@ -1,6 +1,6 @@
 ---
 name: gisloader
-version: 0.1.13+32460
+version: 0.1.14+25410
 authors:
 - Alexander Pfeiffer
 description: 'gisloader: 3D-Kontextmodelle aus offenen Geodaten direkt nach Rhino holen, mit Georeferenz und lokaler Brücke zur Web-App.'

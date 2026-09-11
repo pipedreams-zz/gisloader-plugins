@@ -12,7 +12,7 @@ an der Szene in der Form von BlenderGIS (`crs`, `crsx`, `crsy`).
 bl_info = {
     "name": "gisloader",
     "author": "gisloader",
-    "version": (0, 1, 13),
+    "version": (0, 1, 14),
     "blender": (3, 6, 0),
     "location": "3D-Ansicht › Seitenleiste (N) › gisloader",
     "description": "Exporte von gisloader abholen und mit Georeferenz importieren",
@@ -35,7 +35,7 @@ import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 
 ADDON_ID = __package__ or __name__
-ADDON_VERSION = "0.1.13"
+ADDON_VERSION = "0.1.14"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Blender-Instanzen nehmen den ersten freien Port ab 47800 (bis +9); Cinema 4D ab 47810.
 BRIDGE_PORT_SPAN = 10
@@ -44,7 +44,16 @@ _bridge: "ThreadingHTTPServer | None" = None
 _bridge_thread: "threading.Thread | None" = None
 _bridge_port = 0
 _jobs: list = []  # zuletzt geladene Exportliste (ungefiltert)
+_accounts: list = []  # Konten aus /api/exports/accounts (persönlich und Teams)
 _ssl_ctx = None
+_icons = None  # bpy.utils.previews mit dem Logo
+# Zustand der Brücke für /ping: letzter Import (Export-ID, Erfolg, Meldung), ob gerade importiert wird.
+BRIDGE_STATE = {"last": None, "busy": False}
+
+
+def set_last(export_id, ok, message):
+    BRIDGE_STATE["last"] = {"exportId": export_id, "ok": ok, "message": message, "at": datetime.datetime.now().isoformat(timespec="seconds")}
+    print("[gisloader]", ("Import fertig: " if ok else "Import fehlgeschlagen: ") + message)
 
 DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Downloads", "gisloader")
 
@@ -185,6 +194,11 @@ class GisloaderPreferences(bpy.types.AddonPreferences):
         description="Vor jedem Import (auch über die Brücke) einen Ordnerdialog zeigen, vorbelegt mit dem Speicherordner",
         default=True,
     )
+    account: StringProperty(
+        name="Konto",
+        description="Exporte welcher Konten die Liste zeigt: all (persönlich und alle Teams) oder eine Konto-ID",
+        default="all",
+    )
     port: IntProperty(
         name="Port",
         description="Erster Port der Brücke; belegt ihn eine andere Blender-Instanz, nimmt das Add-on den nächsten freien (bis +9)",
@@ -229,6 +243,7 @@ class GISLOADER_OT_login(bpy.types.Operator):
                 p.token = r["token"]
             self.password = ""
             self.report({"INFO"}, f"Angemeldet als {r.get('user', {}).get('email', p.email)}")
+            _load_accounts(p)
             bpy.ops.gisloader.refresh()
             return {"FINISHED"}
         except Exception as e:
@@ -241,8 +256,11 @@ class GISLOADER_OT_logout(bpy.types.Operator):
     bl_label = "Abmelden"
 
     def execute(self, context):
+        global _accounts, _jobs
         prefs(context).token = ""
         context.scene.gisloader_exports.clear()
+        _accounts = []
+        _jobs = []
         return {"FINISHED"}
 
 
@@ -255,6 +273,40 @@ class GisloaderExportItem(bpy.types.PropertyGroup):
     created: StringProperty()
     state: StringProperty()
     area_km2: FloatProperty()
+    creator: StringProperty()
+    account: StringProperty()
+
+
+def _account_items(self, context):
+    items = [("all", "Alle Konten", "Persönliche Exporte und die aller Teams")]
+    for a in _accounts:
+        label = a["name"] if a.get("kind") == "user" else f"Team {a['name']}"
+        if a.get("active"):
+            label += " (aktiv in der Web-App)"
+        items.append((a["id"], label, ""))
+    return items
+
+
+def _load_accounts(p):
+    """Konten vom Server holen (persönlich und Teams) für die Kontoauswahl."""
+    global _accounts
+    try:
+        _accounts = list(api(p, "/api/exports/accounts"))
+    except Exception as e:
+        _accounts = []
+        print("[gisloader] Konten nicht geladen:", describe_error(e))
+
+
+def session_ok(p):
+    """Gilt die gespeicherte Sitzung noch? /api/me antwortet sonst mit user = null."""
+    if not p.token:
+        return False
+    try:
+        return bool(api(p, "/api/me").get("user"))
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return False
+        raise
 
 
 def _fill_items(scene):
@@ -269,6 +321,8 @@ def _fill_items(scene):
         it.name = j.get("request", {}).get("name") or j["id"][:8]
         it.created = j.get("createdAt", "")[:16].replace("T", " ")
         it.state = j.get("state", "")
+        it.creator = j.get("creator", "")
+        it.account = j.get("accountName", "")
         b = j.get("request", {}).get("bbox", {})
         it.area_km2 = abs((b.get("maxX", 0) - b.get("minX", 0)) * (b.get("maxY", 0) - b.get("minY", 0))) / 1e6
     if scene.gisloader_export_index >= len(items):
@@ -280,6 +334,35 @@ def _period_changed(self, context):
     _fill_items(context.scene)
 
 
+def _account_changed(self, context):
+    if prefs(context).token:
+        bpy.ops.gisloader.refresh()
+
+
+def _load_icons():
+    global _icons
+    try:
+        import bpy.utils.previews
+
+        _icons = bpy.utils.previews.new()
+        path = os.path.join(os.path.dirname(__file__), "icons", "gisloader.png")
+        if os.path.exists(path):
+            _icons.load("logo", path, "IMAGE")
+    except Exception as e:
+        print("[gisloader] Logo nicht geladen:", e)
+        _icons = None
+
+
+def _unload_icons():
+    global _icons
+    if _icons is not None:
+        try:
+            bpy.utils.previews.remove(_icons)
+        except Exception:
+            pass
+        _icons = None
+
+
 class GISLOADER_OT_refresh(bpy.types.Operator):
     bl_idname = "gisloader.refresh"
     bl_label = "Exporte aktualisieren"
@@ -289,7 +372,16 @@ class GISLOADER_OT_refresh(bpy.types.Operator):
         global _jobs
         p = prefs(context)
         try:
-            _jobs = list(api(p, "/api/exports"))
+            if not session_ok(p):
+                p.token = ""
+                _jobs = []
+                _fill_items(context.scene)
+                self.report({"ERROR"}, "Sitzung abgelaufen, bitte neu anmelden")
+                return {"CANCELLED"}
+            if not _accounts:
+                _load_accounts(p)
+            account = context.scene.gisloader_account or "all"
+            _jobs = list(api(p, f"/api/exports?account={account}"))
         except Exception as e:
             self.report({"ERROR"}, describe_error(e))
             return {"CANCELLED"}
@@ -304,6 +396,9 @@ class GISLOADER_UL_exports(bpy.types.UIList):
         row.label(text=item.name, icon="CHECKMARK" if item.state == "done" else "TIME")
         row.label(text=f"{item.area_km2:.3f} km²")
         row.label(text=item.created)
+        extra = " · ".join(x for x in ((item.account if item.account != "Persönlich" else ""), item.creator) if x)
+        if extra:
+            row.label(text=extra)
 
 
 # ── Import ──────────────────────────────────────────────────────────────
@@ -420,6 +515,7 @@ class GISLOADER_OT_import(bpy.types.Operator):
     export_id: StringProperty(name="Export-ID", default="")
     directory: StringProperty(name="Speicherordner", subtype="DIR_PATH", default="")
     filter_folder: BoolProperty(default=True, options={"HIDDEN"})
+    from_bridge: BoolProperty(default=False, options={"HIDDEN"})
 
     def _resolve_id(self, context):
         if self.export_id:
@@ -447,11 +543,22 @@ class GISLOADER_OT_import(bpy.types.Operator):
             self.report({"ERROR"}, "Kein Export ausgewählt")
             return {"CANCELLED"}
         try:
-            import_export(context, export_id, self.report, self.directory or None)
+            coll = import_export(context, export_id, self.report, self.directory or None)
+            if self.from_bridge:
+                set_last(export_id, True, f"importiert in „{coll.name}“")
+                BRIDGE_STATE["busy"] = False
             return {"FINISHED"}
         except Exception as e:
+            if self.from_bridge:
+                set_last(export_id, False, describe_error(e))
+                BRIDGE_STATE["busy"] = False
             self.report({"ERROR"}, "Import fehlgeschlagen: " + describe_error(e))
             return {"CANCELLED"}
+
+    def cancel(self, context):
+        if self.from_bridge:
+            set_last(self.export_id, False, "abgebrochen (kein Ordner gewählt)")
+            BRIDGE_STATE["busy"] = False
 
 
 # ── Lokale Brücke ───────────────────────────────────────────────────────
@@ -481,7 +588,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/ping"):
-            self._json(200, {"app": "blender", "version": bpy.app.version_string, "addon": ADDON_VERSION, "port": _bridge_port})
+            self._json(200, {"app": "blender", "version": bpy.app.version_string, "addon": ADDON_VERSION, "port": _bridge_port, "busy": BRIDGE_STATE["busy"], "last": BRIDGE_STATE["last"]})
         else:
             self._json(404, {"error": "unbekannt"})
 
@@ -496,6 +603,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
         if not data.get("exportId"):
             return self._json(400, {"error": "exportId fehlt"})
         IMPORT_QUEUE.put(data)
+        BRIDGE_STATE["busy"] = True
         self._json(202, {"queued": True})
 
     def log_message(self, *args):
@@ -509,27 +617,35 @@ def _import_from_bridge(export_id):
         win = wm.windows[0]
         try:
             with bpy.context.temp_override(window=win, screen=win.screen):
-                bpy.ops.gisloader.import_export("INVOKE_DEFAULT", export_id=export_id)
+                bpy.ops.gisloader.import_export("INVOKE_DEFAULT", export_id=export_id, from_bridge=True)
             return
         except Exception as e:
             print("[gisloader] Ordnerdialog nicht möglich, Speicherordner wird genutzt:", e)
-    bpy.ops.gisloader.import_export("EXEC_DEFAULT", export_id=export_id)
+    bpy.ops.gisloader.import_export("EXEC_DEFAULT", export_id=export_id, from_bridge=True)
 
 
 def _poll_queue():
     try:
         while True:
             data = IMPORT_QUEUE.get_nowait()
+            export_id = data.get("exportId", "")
             server = data.get("server")
             p = prefs()
             if server and server.rstrip("/") != p.server.rstrip("/"):
-                print(f"[gisloader] Import abgelehnt: Server {server} ≠ {p.server}")
+                set_last(export_id, False, f"abgelehnt: Server {server} ≠ {p.server} (Server im Add-on prüfen)")
                 continue
-            _import_from_bridge(data["exportId"])
+            try:
+                _import_from_bridge(export_id)
+            except Exception as e:
+                set_last(export_id, False, describe_error(e))
     except queue.Empty:
         pass
     except Exception as e:
         print("[gisloader] Import über Brücke fehlgeschlagen:", e)
+    finally:
+        # Der Ordnerdialog läuft modal weiter; „busy“ endet mit dem Ergebnis des Operators (set_last).
+        if IMPORT_QUEUE.empty() and BRIDGE_STATE["last"] is not None:
+            BRIDGE_STATE["busy"] = False
     return 1.0
 
 
@@ -613,7 +729,10 @@ class GISLOADER_PT_panel(bpy.types.Panel):
     bl_category = "gisloader"
 
     def draw_header(self, context):
-        self.layout.label(text=f"v{ADDON_VERSION}")
+        if _icons and "logo" in _icons:
+            self.layout.label(text=f"v{ADDON_VERSION}", icon_value=_icons["logo"].icon_id)
+        else:
+            self.layout.label(text=f"v{ADDON_VERSION}")
 
     def draw(self, context):
         p = prefs(context)
@@ -627,7 +746,9 @@ class GISLOADER_PT_panel(bpy.types.Panel):
             row.operator("gisloader.logout", text="", icon="X")
         else:
             col.operator("gisloader.login", icon="KEYINGSET")
-        lay.prop(context.scene, "gisloader_period", text="")
+        row = lay.row(align=True)
+        row.prop(context.scene, "gisloader_account", text="")
+        row.prop(context.scene, "gisloader_period", text="")
         lay.template_list("GISLOADER_UL_exports", "", context.scene, "gisloader_exports", context.scene, "gisloader_export_index", rows=6)
         lay.operator("gisloader.import_export", icon="IMPORT").export_id = ""
         lay.label(text=(p.folder or DEFAULT_FOLDER).replace(os.path.expanduser("~"), "~"), icon="FILE_FOLDER")
@@ -666,6 +787,10 @@ def register():
     bpy.types.Scene.gisloader_period = EnumProperty(
         name="Zeitraum", items=PERIODS, default="month", update=_period_changed
     )
+    bpy.types.Scene.gisloader_account = EnumProperty(
+        name="Konto", items=_account_items, update=_account_changed
+    )
+    _load_icons()
     # Einstellungen sind erst nach der Registrierung erreichbar: Brücke verzögert starten.
     bpy.app.timers.register(_start_bridge_later, first_interval=0.5)
 
@@ -677,6 +802,8 @@ def unregister():
     del bpy.types.Scene.gisloader_exports
     del bpy.types.Scene.gisloader_export_index
     del bpy.types.Scene.gisloader_period
+    del bpy.types.Scene.gisloader_account
+    _unload_icons()
     for c in reversed(CLASSES):
         try:
             bpy.utils.unregister_class(c)

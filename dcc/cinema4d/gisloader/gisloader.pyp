@@ -33,6 +33,9 @@ ID_FOLDER = 1013
 ID_FOLDER_PICK = 1014
 ID_ASK_FOLDER = 1015
 ID_CORONA = 1016
+ID_ACCOUNT = 1017
+ID_PREFER_OBJ = 1018
+ID_LOG = 1019
 
 
 class GisloaderDialog(gui.GeDialog):
@@ -40,6 +43,7 @@ class GisloaderDialog(gui.GeDialog):
         super().__init__()
         self.p = core.load_prefs()
         self.exports = []
+        self.accounts = []  # Konten aus /api/exports/accounts; Combo: 0 = Alle, dann je Konto
 
     def CreateLayout(self):
         self.SetTitle(f"gisloader {core.VERSION}")
@@ -59,11 +63,18 @@ class GisloaderDialog(gui.GeDialog):
         self.AddButton(ID_REFRESH, c4d.BFH_SCALEFIT, name="Exporte aktualisieren")
         self.AddButton(ID_WEB, c4d.BFH_SCALEFIT, name="gisloader im Browser")
         self.GroupEnd()
-        self.GroupBegin(2002, c4d.BFH_SCALEFIT, cols=3)
+        self.GroupBegin(2006, c4d.BFH_SCALEFIT, cols=4)
         self.GroupBorderSpace(8, 0, 8, 4)
+        self.AddStaticText(0, c4d.BFH_LEFT, name="Konto")
+        self.AddComboBox(ID_ACCOUNT, c4d.BFH_SCALEFIT, initw=200)
+        self.AddChild(ID_ACCOUNT, 0, "Alle Konten")
+        self.AddStaticText(0, c4d.BFH_LEFT, name="Zeitraum")
         self.AddComboBox(ID_PERIOD, c4d.BFH_LEFT, initw=130)
         for i, (_, label) in enumerate(core.PERIODS):
             self.AddChild(ID_PERIOD, i, label)
+        self.GroupEnd()
+        self.GroupBegin(2002, c4d.BFH_SCALEFIT, cols=2)
+        self.GroupBorderSpace(8, 0, 8, 4)
         self.AddComboBox(ID_LIST, c4d.BFH_SCALEFIT, initw=320)
         self.AddButton(ID_IMPORT, c4d.BFH_RIGHT, name="Importieren")
         self.GroupEnd()
@@ -76,12 +87,14 @@ class GisloaderDialog(gui.GeDialog):
         self.GroupEnd()
         self.GroupBegin(2005, c4d.BFH_SCALEFIT, cols=1)
         self.GroupBorderSpace(8, 0, 8, 4)
+        self.AddCheckbox(ID_PREFER_OBJ, c4d.BFH_LEFT, initw=0, inith=0, name="Über OBJ importieren (Materialien aus MTL, Höhenlinien als Splines; sonst GLB)")
         self.AddCheckbox(ID_CORONA, c4d.BFH_LEFT, initw=0, inith=0, name="Corona-Materialien erzeugen (Corona Renderer installiert)")
         self.GroupEnd()
-        self.GroupBegin(2003, c4d.BFH_SCALEFIT, cols=2)
+        self.GroupBegin(2003, c4d.BFH_SCALEFIT, cols=3)
         self.GroupBorderSpace(8, 0, 8, 8)
         self.AddCheckbox(ID_BRIDGE, c4d.BFH_LEFT, initw=0, inith=0, name=self.bridge_label())
         self.AddStaticText(ID_STATUS, c4d.BFH_SCALEFIT, name="")
+        self.AddButton(ID_LOG, c4d.BFH_RIGHT, name="Protokoll")
         self.GroupEnd()
         return True
 
@@ -93,6 +106,28 @@ class GisloaderDialog(gui.GeDialog):
         idx = self.GetInt32(ID_PERIOD)
         return core.PERIODS[idx][0] if 0 <= idx < len(core.PERIODS) else "all"
 
+    def account(self):
+        """Gewähltes Konto: "all" oder die Konto-ID."""
+        idx = self.GetInt32(ID_ACCOUNT)
+        return self.accounts[idx - 1]["id"] if 1 <= idx <= len(self.accounts) else "all"
+
+    def fill_accounts(self):
+        """Kontoauswahl vom Server füllen und die gespeicherte Wahl wiederherstellen."""
+        try:
+            self.accounts = core.list_accounts(self.p)
+        except Exception as e:
+            self.accounts = []
+            self.status("Konten: " + core.describe_error(e))
+        self.FreeChildren(ID_ACCOUNT)
+        self.AddChild(ID_ACCOUNT, 0, "Alle Konten")
+        for i, a in enumerate(self.accounts):
+            label = a["name"] if a.get("kind") == "user" else f"Team {a['name']}"
+            self.AddChild(ID_ACCOUNT, i + 1, label + (" (aktiv in der Web-App)" if a.get("active") else ""))
+        wanted = self.p.get("account", "all")
+        idx = next((i + 1 for i, a in enumerate(self.accounts) if a["id"] == wanted), 0)
+        self.SetInt32(ID_ACCOUNT, idx)
+        self.LayoutChanged(ID_ACCOUNT)
+
     def InitValues(self):
         self.SetString(ID_SERVER, self.p["server"])
         self.SetString(ID_EMAIL, self.p["email"])
@@ -102,12 +137,28 @@ class GisloaderDialog(gui.GeDialog):
         has_corona = core.corona_available()
         self.SetBool(ID_CORONA, has_corona and bool(self.p.get("corona", False)))
         self.Enable(ID_CORONA, has_corona)
+        self.SetBool(ID_PREFER_OBJ, bool(self.p.get("prefer_obj", True)))
         ids = [k for k, _ in core.PERIODS]
         self.SetInt32(ID_PERIOD, ids.index(self.p.get("period", "month")) if self.p.get("period") in ids else 1)
         self.status("Angemeldet" if self.p.get("token") else "Nicht angemeldet")
         if self.p.get("token"):
-            self.refresh()
+            self.check_session_and_refresh()
         return True
+
+    def check_session_and_refresh(self):
+        """Beim Öffnen: Sitzung prüfen (abgelaufene Sitzungen liefern sonst stumm eine leere Liste), dann Liste laden."""
+        try:
+            ok = core.session_ok(self.p)
+        except Exception as e:
+            self.status("Server nicht erreichbar: " + core.describe_error(e))
+            return
+        if not ok:
+            self.p["token"] = ""
+            core.save_prefs(self.p)
+            self.status("Sitzung abgelaufen, bitte neu anmelden")
+            return
+        self.fill_accounts()
+        self.refresh()
 
     def status(self, text):
         self.SetString(ID_STATUS, text)
@@ -120,21 +171,27 @@ class GisloaderDialog(gui.GeDialog):
         self.p["folder"] = self.GetString(ID_FOLDER).strip() or core.DEFAULT_FOLDER
         self.p["ask_folder"] = self.GetBool(ID_ASK_FOLDER)
         self.p["corona"] = self.GetBool(ID_CORONA)
+        self.p["prefer_obj"] = self.GetBool(ID_PREFER_OBJ)
+        self.p["account"] = self.account()
         core.save_prefs(self.p)
 
     def refresh(self):
+        if not self.p.get("token"):
+            self.status("Nicht angemeldet")
+            return
         try:
-            self.exports = core.list_exports(self.p, self.period())
+            self.exports = core.list_exports(self.p, self.period(), self.account())
         except Exception as e:
             self.status("Liste: " + core.describe_error(e))
             return
         self.FreeChildren(ID_LIST)
         for i, ex in enumerate(self.exports):
-            mark = "✓" if ex["state"] == "done" else "…"
-            self.AddChild(ID_LIST, i, f"{mark} {ex['name']} · {ex['area_km2']:.3f} km² · {ex['created']}")
+            self.AddChild(ID_LIST, i, core.export_label(ex, show_account=self.account() == "all"))
         if self.exports:
             self.SetInt32(ID_LIST, 0)
-        self.status(f"{len(self.exports)} Exporte im Zeitraum")
+        self.LayoutChanged(ID_LIST)
+        where = "in allen Konten" if self.account() == "all" else "im Konto"
+        self.status(f"{len(self.exports)} Exporte {where} im Zeitraum" + ("" if self.exports else " – Zeitraum oder Konto wechseln"))
 
     def Command(self, id, msg):
         if id == ID_LOGIN:
@@ -143,6 +200,7 @@ class GisloaderDialog(gui.GeDialog):
                 who = core.login(self.p, self.GetString(ID_PASSWORD))
                 self.SetString(ID_PASSWORD, "")
                 self.status("Angemeldet als " + who)
+                self.fill_accounts()
                 self.refresh()
             except Exception as e:
                 self.status("Anmeldung: " + core.describe_error(e))
@@ -151,9 +209,21 @@ class GisloaderDialog(gui.GeDialog):
             core.save_prefs(self.p)
             self.FreeChildren(ID_LIST)
             self.status("Abgemeldet")
-        elif id == ID_REFRESH or id == ID_PERIOD:
+        elif id == ID_REFRESH:
+            self.sync_prefs()
+            if self.p.get("token") and not self.accounts:
+                self.check_session_and_refresh()
+            else:
+                self.refresh()
+        elif id in (ID_PERIOD, ID_ACCOUNT):
             self.sync_prefs()
             self.refresh()
+        elif id == ID_LOG:
+            path = os.path.join(c4d.storage.GeGetC4DPath(c4d.C4D_PATH_PREFS), "gisloader.log")
+            if os.path.exists(path):
+                c4d.storage.ShowInFinder(path, True)
+            else:
+                self.status("Noch kein Protokoll: " + path)
         elif id == ID_WEB:
             self.sync_prefs()
             core.open_web(self.p)
@@ -166,7 +236,7 @@ class GisloaderDialog(gui.GeDialog):
             if chosen:
                 self.SetString(ID_FOLDER, chosen)
                 self.sync_prefs()
-        elif id in (ID_ASK_FOLDER, ID_CORONA):
+        elif id in (ID_ASK_FOLDER, ID_CORONA, ID_PREFER_OBJ):
             self.sync_prefs()
         elif id == ID_IMPORT:
             idx = self.GetInt32(ID_LIST)
@@ -180,9 +250,11 @@ class GisloaderDialog(gui.GeDialog):
                 return True
             try:
                 doc = c4d.documents.GetActiveDocument()
+                self.status("Import läuft …")
                 root, n = core.import_export(doc, self.p, self.exports[idx]["id"], folder)
-                self.status(f"{n} Objekte unter „{root.GetName()}“ · Dateien unter {root[root.GetUserDataContainer()[-1][0]] if False else core.resolve_folder(self.p, folder)}")
+                self.status(f"{n} Objekte unter „{root.GetName()}“ · Dateien unter {core.resolve_folder(self.p, folder)}")
             except Exception as e:
+                core.log("Import fehlgeschlagen: " + core.describe_error(e))
                 self.status("Import: " + core.describe_error(e))
         elif id == ID_BRIDGE:
             self.sync_prefs()
@@ -214,17 +286,17 @@ def apply_bridge(p):
 
 
 class GisloaderCommand(plugins.CommandData):
-    dialog = None
+    dialog = None  # klassenweit, damit der Brücken-Listener den Status ins offene Fenster schreiben kann
 
     def Execute(self, doc):
-        if self.dialog is None:
-            self.dialog = GisloaderDialog()
-        return self.dialog.Open(dlgtype=c4d.DLG_TYPE_ASYNC, pluginid=PLUGIN_ID, defaultw=460, defaulth=200)
+        if GisloaderCommand.dialog is None:
+            GisloaderCommand.dialog = GisloaderDialog()
+        return GisloaderCommand.dialog.Open(dlgtype=c4d.DLG_TYPE_ASYNC, pluginid=PLUGIN_ID, defaultw=520, defaulth=240)
 
     def RestoreLayout(self, sec_ref):
-        if self.dialog is None:
-            self.dialog = GisloaderDialog()
-        return self.dialog.Restore(pluginid=PLUGIN_ID, secret=sec_ref)
+        if GisloaderCommand.dialog is None:
+            GisloaderCommand.dialog = GisloaderDialog()
+        return GisloaderCommand.dialog.Restore(pluginid=PLUGIN_ID, secret=sec_ref)
 
 
 class GisloaderBridgeListener(plugins.MessageData):
@@ -232,13 +304,34 @@ class GisloaderBridgeListener(plugins.MessageData):
 
     def CoreMessage(self, id, bc):
         if id == BRIDGE_EVENT_ID:
+            dialog = GisloaderCommand.dialog
             try:
                 p = core.load_prefs()
-                for root, n in core.drain_queue(c4d.documents.GetActiveDocument(), p, choose_folder):
-                    print(f"[gisloader] {n} Objekte importiert unter „{root.GetName()}“")
+                if dialog is not None and dialog.IsOpen():
+                    dialog.status("Import über die Brücke läuft …")
+                core.drain_queue(c4d.documents.GetActiveDocument(), p, choose_folder)
             except Exception as e:
-                print("[gisloader] Import über Brücke fehlgeschlagen:", e)
+                core.set_last("", False, describe(e))
+            last = core.BRIDGE_STATE.get("last") or {}
+            text = last.get("message", "")
+            if dialog is not None and dialog.IsOpen():
+                dialog.status(("Brücke: " if last.get("ok") else "Brücke, Fehler: ") + text)
+            if last and not last.get("ok"):
+                gui.MessageDialog("gisloader: Import über die Brücke fehlgeschlagen.\n\n" + text)
         return True
+
+
+def describe(e):
+    return core.describe_error(e)
+
+
+def load_icon():
+    """Logo aus res/icon.png als Menü- und Palettensymbol; None, wenn es fehlt."""
+    path = os.path.join(os.path.dirname(__file__), "res", "icon.png")
+    bmp = c4d.bitmaps.BaseBitmap()
+    if os.path.exists(path) and bmp.InitWith(path)[0] == c4d.IMAGERESULT_OK:
+        return bmp
+    return None
 
 
 if __name__ == "__main__":
@@ -246,7 +339,7 @@ if __name__ == "__main__":
         id=PLUGIN_ID,
         str="gisloader",
         info=0,
-        icon=None,
+        icon=load_icon(),
         help="Exporte von gisloader abholen und mit Georeferenz importieren",
         dat=GisloaderCommand(),
     )

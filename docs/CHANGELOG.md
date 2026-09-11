@@ -4,6 +4,21 @@ Jedes Plugin zählt seine Version eigenständig und wird nur hochgezählt, wenn
 sich sein Code ändert. Releases im Plugin-Repo tragen ein Datum und nennen
 die enthaltenen Plugin-Versionen.
 
+## 11. September 2026
+
+- Blender, Cinema 4D, Rhino 0.1.14: Kontoauswahl „Alle Konten | Persönlich |
+  Team …“ (Exporte aller Teams mit Ersteller je Zeile; die Liste war leer,
+  wenn die Exporte auf dem Teamkonto lagen und das Plugin nur das persönliche
+  Konto sah), Sitzungsprüfung beim Öffnen mit klarer Meldung statt leerer
+  Liste, Rückmeldung der Brücke an die Web-App (Ergebnis des Imports in
+  `/ping`), Logo als Symbol (Cinema-4D-Menü, Blender-Panel, Rhino-Werkzeugleiste).
+- Cinema 4D 0.1.14: Import über die OBJ des Exports (Materialien aus der
+  MTL, Höhenlinien als Splines, Achsen wie glTF), GLB nur noch als Rückfall;
+  Corona-Materialien mit festen Parameter-IDs (Base layer › Color/Texture,
+  Corona-Bitmap › File), geprüft mit Corona 13; Protokolldatei
+  `gisloader.log` und Knopf „Protokoll“; Fehler der Brücke als Dialog.
+- Rhino 0.1.14: Werkzeugleiste mit gisloader-Symbolen (hell/dunkel).
+
 ## 8. September 2026
 
 - Archicad 0.1.13: Oberflächen je Materialart mit den Farben des Exports,

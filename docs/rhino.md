@@ -10,18 +10,28 @@ EarthAnchorPoint.
 - Befehl `gisloader` öffnet das Fenster (Versionsnummer im Titel);
   `gisloaderBridge` startet nur die Brücke, etwa beim Rhino-Start.
 - E-Mail und Passwort eintragen, „Anmelden“. Die Sitzung bleibt gespeichert;
-  ist das Plugin angemeldet, zeigt das Passwortfeld Platzhalter.
-- Zeitraum links neben der Liste: diese Woche, dieser Monat (Vorgabe), dieses
-  Jahr, alle. „Exporte aktualisieren“ lädt die Liste, „Importieren“ holt den
-  gewählten Export in das aktive Dokument.
+  ist das Plugin angemeldet, zeigt das Passwortfeld Platzhalter. Beim Öffnen
+  prüft das Plugin die Sitzung und lädt die Liste; „Sitzung abgelaufen“ im
+  Status heißt neu anmelden.
+- Konto: „Alle Konten“ (Vorgabe) zeigt persönliche Exporte und die aller
+  Teams, in denen du Mitglied bist, mit Team und Ersteller je Zeile; sonst
+  ein einzelnes Konto. So exportiert ein Teammitglied, ein anderes lädt im
+  Plugin.
+- Zeitraum: diese Woche, dieser Monat (Vorgabe), dieses Jahr, alle.
+  „Exporte aktualisieren“ lädt die Liste, „Importieren“ holt den gewählten
+  Export in das aktive Dokument.
 - Speicherordner (Vorgabe `~/Downloads/gisloader`, „…“ öffnet die Auswahl);
   „Beim Import fragen“ zeigt vor jedem Import einen Ordnerdialog. Jeder
   Export bekommt einen Unterordner `<Ort>_<ID>` mit GLB, Texturen,
   Provenienz und README.
 - Brücke: Das Plugin lauscht auf dem ersten freien Port von
-  `127.0.0.1:47820` bis 47829. „An Rhino senden“ in der Web-App schickt die
-  Export-ID dorthin; die Brücke bleibt aktiv, auch wenn das Fenster
-  geschlossen ist.
+  `127.0.0.1:47820` bis 47829. „An Rhino senden“ in der Web-App (Exportpanel
+  und Exportliste des Kontos) schickt die Export-ID dorthin; die Web-App
+  wartet auf das Ergebnis und zeigt es an. Die Brücke bleibt aktiv, auch wenn
+  das Fenster geschlossen ist.
+- Werkzeugleiste: Das Paket bringt eine Leiste „gisloader“ mit zwei Knöpfen
+  (Fenster, Brücke) und dem gisloader-Symbol mit; sie erscheint nach der
+  Installation, sonst über Optionen › Werkzeugleisten › `gisloader.rui`.
 
 ### Ebenen
 

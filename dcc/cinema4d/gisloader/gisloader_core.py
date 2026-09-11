@@ -3,9 +3,11 @@ Kern des gisloader-Plugins für Cinema 4D (ohne Oberfläche, damit er sich in
 c4dpy prüfen lässt): Einstellungen, Server-Zugriff, Import mit Georeferenz
 und die lokale Brücke.
 
-Achsen: Cinema 4D und glTF sind beide Y-up, der Importer dreht nichts:
-X = Ost, Y = Höhe, Z = −Nord. Dokumenteinheit ist Zentimeter, der glTF-Import
-rechnet Meter um. Ursprung und CRS stehen als User Data am Null-Objekt.
+Import bevorzugt die OBJ des Exports (Materialien aus der MTL mit Texturdatei,
+Höhenlinien als Splines); fehlt sie, kommt die GLB. Achsen wie glTF:
+X = Ost, Y = Höhe, Z = −Nord. Die OBJ (Z-up) wird beim Import gedreht.
+Dokumenteinheit ist Zentimeter, beide Importer rechnen Meter um. Ursprung und
+CRS stehen als User Data am Null-Objekt.
 """
 
 import datetime
@@ -31,7 +33,7 @@ try:
 except ImportError:  # pragma: no cover – alte Versionen ohne Node-API
     maxon = None
 
-VERSION = "0.1.13"
+VERSION = "0.1.14"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Cinema 4D nimmt den ersten freien Port ab 47810 (bis +9); Blender liegt ab 47800.
 BRIDGE_PORT = 47810
@@ -47,6 +49,25 @@ PERIODS = [
     ("year", "Dieses Jahr"),
     ("all", "Alle"),
 ]
+
+# Zustand der Brücke für /ping: letzter Import (Export-ID, Erfolg, Meldung) und ob gerade importiert wird.
+BRIDGE_STATE = {"last": None, "busy": False}
+
+
+def log(text):
+    """Meldung in die Python-Konsole und nach gisloader.log im Prefs-Ordner (Fehlersuche ohne Konsole)."""
+    line = f"[gisloader] {text}"
+    print(line)
+    try:
+        with open(os.path.join(c4d.storage.GeGetC4DPath(c4d.C4D_PATH_PREFS), "gisloader.log"), "a", encoding="utf-8") as f:
+            f.write(datetime.datetime.now().isoformat(timespec="seconds") + " " + line + "\n")
+    except Exception:
+        pass
+
+
+def set_last(export_id, ok, message):
+    BRIDGE_STATE["last"] = {"exportId": export_id, "ok": ok, "message": message, "at": datetime.datetime.now().isoformat(timespec="seconds")}
+    log(("Import fertig: " if ok else "Import fehlgeschlagen: ") + message)
 
 
 def in_period(created_iso, period):
@@ -111,6 +132,8 @@ def load_prefs():
         "folder": DEFAULT_FOLDER,
         "ask_folder": True,
         "corona": False,
+        "account": "all",
+        "prefer_obj": True,
     }
     try:
         with open(prefs_path(), "r", encoding="utf-8") as f:
@@ -169,9 +192,29 @@ def login(p, password):
     return r.get("user", {}).get("email", p["email"])
 
 
-def list_exports(p, period="all"):
-    """Exporte des Kontos, auf den Zeitraum gefiltert (week/month/year/all)."""
-    jobs = api(p, "/api/exports")
+def session_ok(p):
+    """Gilt die gespeicherte Sitzung noch? Der Server antwortet auf /api/me mit user = null, wenn nicht."""
+    if not p.get("token"):
+        return False
+    try:
+        return bool(api(p, "/api/me").get("user"))
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return False
+        raise
+
+
+def list_accounts(p):
+    """Konten, deren Exporte das Konto sehen darf: persönlich und alle Teams (id, kind, name, role, active)."""
+    return api(p, "/api/exports/accounts")
+
+
+def list_exports(p, period="all", account="all"):
+    """
+    Exporte, auf den Zeitraum gefiltert (week/month/year/all). `account` ist "all"
+    (persönlich und alle Teams), eine Konto-ID oder "" (aktives Konto der Sitzung).
+    """
+    jobs = api(p, "/api/exports" + (f"?account={account}" if account else ""))
     out = []
     for j in jobs:
         if not in_period(j.get("createdAt", ""), period):
@@ -185,9 +228,22 @@ def list_exports(p, period="all"):
                 "created": j.get("createdAt", "")[:16].replace("T", " "),
                 "state": j.get("state", ""),
                 "area_km2": area,
+                "creator": j.get("creator", ""),
+                "account": j.get("accountName", ""),
             }
         )
     return out
+
+
+def export_label(ex, show_account=True):
+    """Zeile für die Exportliste: ✓ Ort · km² · Datum · Team · von Name."""
+    mark = "✓" if ex["state"] == "done" else "…"
+    parts = [f"{mark} {ex['name']}", f"{ex['area_km2']:.3f} km²", ex["created"]]
+    if show_account and ex.get("account") and ex["account"] != "Persönlich":
+        parts.append(ex["account"])
+    if ex.get("creator"):
+        parts.append("von " + ex["creator"])
+    return " · ".join(parts)
 
 
 def open_web(p):
@@ -410,6 +466,13 @@ def _relink_node_material(doc, mat, tex_dir):
 CORONA_PHYSICAL_MTL = 1056306  # Corona Physical Material (ab Corona 7)
 CORONA_LEGACY_MTL = 1032100  # Corona Material (klassisch)
 CORONA_BITMAP = 1036473  # Corona Bitmap Shader
+# Parameter-IDs aus der Beschreibung der Materialien (Corona 13, Cinema 4D 2026):
+# Physical: Base layer › Color (Farbe) und Texture; Legacy: Diffuse › Color und Texture.
+CORONA_PHYSICAL_COLOR = 20227
+CORONA_PHYSICAL_TEXTURE = 20228
+CORONA_LEGACY_COLOR = 4300
+CORONA_LEGACY_TEXTURE = 4301
+CORONA_BITMAP_FILE = 11520
 
 
 def corona_available():
@@ -441,59 +504,68 @@ def _lin_to_srgb(v):
     return v * 12.92 if v <= 0.0031308 else 1.055 * (v ** (1 / 2.4)) - 0.055
 
 
-def _desc_params(node):
-    """(Name, Gruppenname, DescID, DTYPE) aller Parameter einer Beschreibung."""
-    desc = node.GetDescription(c4d.DESCFLAGS_DESC_NONE)
-    groups = {}
-    entries = []
-    for bc, pid, gid in desc:
-        name = bc[c4d.DESC_NAME] or bc[c4d.DESC_SHORT_NAME] or ""
-        dtype = pid[-1].dtype if pid.GetDepth() else 0
-        if dtype == c4d.DTYPE_GROUP:
-            groups[str(pid)] = name
-        entries.append((name, str(gid), pid, dtype))
-    return [(n, groups.get(g, ""), pid, dt) for n, g, pid, dt in entries]
-
-
-def _find_param(params, dtype, names):
-    """Ersten Parameter mit Typ dtype finden, dessen Name oder Gruppenname eines der Muster enthält."""
-    for pattern in names:
-        pat = pattern.lower()
-        for name, group, pid, dt in params:
-            if dt == dtype and (pat in name.lower() or pat in group.lower()):
-                return pid, name, group
-    return None
+def _material_look(mat, tex_dir):
+    """
+    Farbe (sRGB, 0–1) und Texturdatei eines importierten Standardmaterials: aus dem
+    Farbkanal (OBJ/MTL-Import: Kd und map_Kd) oder aus einem Bitmap-Shader darin.
+    Liefert (Farbe | None, Pfad | None).
+    """
+    color = None
+    texture = None
+    if mat.GetType() == c4d.Mmaterial:
+        try:
+            c = mat[c4d.MATERIAL_COLOR_COLOR]
+            color = (c.x, c.y, c.z)
+        except Exception:
+            color = None
+        sh = mat[c4d.MATERIAL_COLOR_SHADER]
+        if sh is not None and sh.GetType() == c4d.Xbitmap:
+            fn = sh[c4d.BITMAPSHADER_FILENAME] or ""
+            if fn and os.path.exists(fn):
+                texture = fn
+    if texture is None:
+        for sh in _shaders(mat.GetFirstShader()):
+            if sh.GetType() == c4d.Xbitmap:
+                fn = sh[c4d.BITMAPSHADER_FILENAME] or ""
+                if fn and os.path.exists(fn):
+                    texture = fn
+                    break
+    if texture is None and tex_dir and os.path.isdir(tex_dir):
+        name = mat.GetName()
+        hits = sorted(glob.glob(os.path.join(tex_dir, f"{name}_*"))) + sorted(glob.glob(os.path.join(tex_dir, f"{name}.*")))
+        texture = hits[0] if hits else None
+    return color, texture
 
 
 def _corona_material(doc, name, color, texture_path):
-    """Corona-Material mit Grundfarbe oder Textur anlegen; Parameter-IDs kommen aus der Beschreibung."""
-    mtl_id = CORONA_PHYSICAL_MTL if c4d.plugins.FindPlugin(CORONA_PHYSICAL_MTL, c4d.PLUGINTYPE_MATERIAL) else CORONA_LEGACY_MTL
-    mat = c4d.BaseMaterial(mtl_id)
+    """
+    Corona Physical Material (sonst Corona Legacy) mit Grundfarbe und, falls vorhanden,
+    Textur im Corona-Bitmap-Shader (Rückfall: Cinema-4D-Bitmap-Shader). Farbe in sRGB.
+    """
+    physical = c4d.plugins.FindPlugin(CORONA_PHYSICAL_MTL, c4d.PLUGINTYPE_MATERIAL) is not None
+    mat = c4d.BaseMaterial(CORONA_PHYSICAL_MTL if physical else CORONA_LEGACY_MTL)
     if mat is None:
         return None
     mat.SetName(name)
-    params = _desc_params(mat)
-    color_param = _find_param(params, c4d.DTYPE_COLOR, ["base color", "diffuse color", "diffuse", "color"])
-    tex_param = _find_param(params, c4d.DTYPE_BASELISTLINK, ["base color", "diffuse", "color"])
-    if color_param and color is not None:
-        mat[color_param[0]] = c4d.Vector(*[_lin_to_srgb(max(0.0, min(1.0, c))) for c in color])
-    if texture_path and tex_param:
-        shader = c4d.BaseShader(CORONA_BITMAP) if c4d.plugins.FindPlugin(CORONA_BITMAP, c4d.PLUGINTYPE_SHADER) else None
-        if shader is not None:
-            sp = _desc_params(shader)
-            fparam = _find_param(sp, c4d.DTYPE_FILENAME, ["filename", "file", "path", "image"])
-            if fparam:
-                shader[fparam[0]] = texture_path
-            else:
-                shader = None
+    color_id = CORONA_PHYSICAL_COLOR if physical else CORONA_LEGACY_COLOR
+    tex_id = CORONA_PHYSICAL_TEXTURE if physical else CORONA_LEGACY_TEXTURE
+    if color is not None:
+        mat[color_id] = c4d.Vector(*[max(0.0, min(1.0, float(c))) for c in color])
+    if texture_path:
+        shader = None
+        if c4d.plugins.FindPlugin(CORONA_BITMAP, c4d.PLUGINTYPE_SHADER) is not None:
+            shader = c4d.BaseShader(CORONA_BITMAP)
+            if shader is not None:
+                try:
+                    shader[CORONA_BITMAP_FILE] = texture_path
+                except Exception as e:
+                    log(f"Corona-Bitmap-Shader ohne Dateiparameter ({e!r}), nehme Bitmap-Shader von Cinema 4D")
+                    shader = None
         if shader is None:
             shader = c4d.BaseShader(c4d.Xbitmap)
             shader[c4d.BITMAPSHADER_FILENAME] = texture_path
         mat.InsertShader(shader)
-        mat[tex_param[0]] = shader
-    elif texture_path:
-        print(f"[gisloader] Corona: kein Textur-Slot in {mat.GetTypeName()} gefunden; Parameter: "
-              + ", ".join(f"{n}/{g}" for n, g, _, dt in params if dt == c4d.DTYPE_BASELISTLINK)[:800])
+        mat[tex_id] = shader
     mat.Update(True, True)
     doc.InsertMaterial(mat)
     doc.AddUndo(c4d.UNDOTYPE_NEW, mat)
@@ -509,28 +581,36 @@ def _walk(obj):
 
 def convert_to_corona(doc, root, glb_paths, materials, tex_dir):
     """
-    Für jedes Material der GLBs ein Corona-Material anlegen (Farbe aus baseColorFactor,
-    Textur aus tex/), Texture-Tags unter root umhängen, importierte Materialien entfernen.
+    Für jedes importierte Material ein Corona-Material anlegen (Farbe und Textur aus dem
+    Standardmaterial des OBJ-Imports, sonst aus den GLB-Materialien und tex/), die
+    Texture-Tags unter root umhängen und die importierten Materialien entfernen.
     Liefert die Zahl der ersetzten Materialien.
     """
     by_name = {}
     for g in glb_paths:
-        for m in _glb_materials(g):
-            by_name.setdefault(m["name"], m)
+        try:
+            for m in _glb_materials(g):
+                by_name.setdefault(m["name"], m)
+        except Exception as e:
+            log(f"GLB-Materialien aus {os.path.basename(g)} nicht lesbar: {e!r}")
     created = {}
     for mat in materials:
         name = mat.GetName()
-        info = by_name.get(name) or by_name.get(name.split(".")[0]) or {"name": name, "color": None, "textured": False}
-        texture = None
-        if info["textured"] or not by_name.get(name):
-            hits = sorted(glob.glob(os.path.join(tex_dir, f"{name}_*"))) + sorted(glob.glob(os.path.join(tex_dir, f"{name}.*")))
-            texture = hits[0] if hits else None
-        cm = _corona_material(doc, name, info["color"], texture)
+        color, texture = _material_look(mat, tex_dir)
+        info = by_name.get(name) or by_name.get(name.split(".")[0])
+        if color is None and info and info.get("color") is not None:
+            color = [_lin_to_srgb(max(0.0, min(1.0, c))) for c in info["color"]]
+        # Das alte Material zuerst umbenennen, sonst bekommt das neue den Namen mit „.1“.
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE, mat)
+        mat.SetName(name + " (Import)")
+        cm = _corona_material(doc, name, color, texture)
         if cm is not None:
             created[name] = (mat, cm)
+        else:
+            mat.SetName(name)
+            log(f"Corona-Material „{name}“: Farbe {tuple(round(c, 3) for c in color) if color else '–'}, Textur {os.path.basename(texture) if texture else '–'}")
     if not created:
         return 0
-    old_by_name = {n: pair[0] for n, pair in created.items()}
     for obj in _walk(root):
         for tag in obj.GetTags():
             if tag.GetType() != c4d.Ttexture:
@@ -538,7 +618,7 @@ def convert_to_corona(doc, root, glb_paths, materials, tex_dir):
             old = tag[c4d.TEXTURETAG_MATERIAL]
             if old is None:
                 continue
-            pair = created.get(old.GetName())
+            pair = created.get(old.GetName().replace(" (Import)", ""))
             if pair and old == pair[0]:
                 doc.AddUndo(c4d.UNDOTYPE_CHANGE, tag)
                 tag[c4d.TEXTURETAG_MATERIAL] = pair[1]
@@ -548,11 +628,107 @@ def convert_to_corona(doc, root, glb_paths, materials, tex_dir):
     return len(created)
 
 
+# ── OBJ-Import ──────────────────────────────────────────────────────────
+
+
+def obj_up_axis(path):
+    """Auf-Achse aus der Kopfzeile der gisloader-OBJ („…, Z-up“ oder „…, Y-up“); Vorgabe Z."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            head = f.readline()
+        return "Y" if "Y-up" in head else "Z"
+    except OSError:
+        return "Z"
+
+
+def _obj_import_settings():
+    """Einstellungen des OBJ-Importers (globaler Container des Scene-Loaders)."""
+    plug = c4d.plugins.FindPlugin(c4d.FORMAT_OBJ2IMPORT, c4d.PLUGINTYPE_SCENELOADER)
+    if plug is None:
+        return None
+    op = {}
+    if not plug.Message(c4d.MSG_RETRIEVEPRIVATEDATA, op) or "imexporter" not in op:
+        return None
+    return op["imexporter"]
+
+
+def import_obj(doc, path):
+    """
+    OBJ des Exports einfügen: Meter → Dokumenteinheit, Materialien aus der MTL (Kd, map_Kd),
+    ein Objekt je „o“, Linien als Splines. Die gisloader-OBJ ist Z-up (X Ost, Y Nord, Z Höhe);
+    mit „Y und Z tauschen“ (Z-Achse bleibt gespiegelt) entsteht wie bei glTF X = Ost,
+    Y = Höhe, Z = −Nord (in c4dpy geprüft). Y-up-OBJ: kein Tausch, keine Spiegelung.
+    Die Importer-Einstellungen werden danach zurückgesetzt.
+    """
+    bc = _obj_import_settings()
+    if bc is None:
+        raise RuntimeError("OBJ-Importer nicht gefunden")
+    up = obj_up_axis(path)
+    keys = [
+        c4d.OBJIMPORTOPTIONS_SCALE,
+        c4d.OBJIMPORTOPTIONS_MATERIAL,
+        c4d.OBJIMPORTOPTIONS_SPLITBY,
+        c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_SWAPYZ,
+        c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_FLIPZ,
+        c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_FLIPX,
+        c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_FLIPY,
+        c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_SWAPXY,
+        c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_SWAPXZ,
+        c4d.OBJIMPORTOPTIONS_IMPORT_UVS,
+        c4d.OBJIMPORTOPTIONS_LINES,
+    ]
+    saved = {k: bc[k] for k in keys}
+    try:
+        scale = c4d.UnitScaleData()
+        scale.SetUnitScale(1.0, c4d.DOCUMENT_UNIT_M)
+        bc[c4d.OBJIMPORTOPTIONS_SCALE] = scale
+        bc[c4d.OBJIMPORTOPTIONS_MATERIAL] = c4d.OBJIMPORTOPTIONS_MATERIAL_MTLFILE
+        bc[c4d.OBJIMPORTOPTIONS_SPLITBY] = c4d.OBJIMPORTOPTIONS_SPLITBY_OBJECT
+        bc[c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_SWAPYZ] = up == "Z"
+        bc[c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_FLIPZ] = up == "Z"
+        bc[c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_FLIPX] = False
+        bc[c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_FLIPY] = False
+        bc[c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_SWAPXY] = False
+        bc[c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_SWAPXZ] = False
+        bc[c4d.OBJIMPORTOPTIONS_IMPORT_UVS] = c4d.OBJIMPORTOPTIONS_UV_ORIGINAL
+        bc[c4d.OBJIMPORTOPTIONS_LINES] = c4d.OBJIMPORTOPTIONS_LINES_DEFAULT
+        return c4d.documents.MergeDocument(
+            doc, path, c4d.SCENEFILTER_OBJECTS | c4d.SCENEFILTER_MATERIALS | c4d.SCENEFILTER_MERGESCENE, None
+        )
+    finally:
+        for k, v in saved.items():
+            if v is not None:
+                bc[k] = v
+
+
+def _reparent_new(doc, before, root):
+    """Neue Objekte auf oberster Ebene unter root hängen; eine Hülle des OBJ-Importers auflösen."""
+    new = [o for o in doc.GetObjects() if o.GetGUID() not in before and o is not root]
+    n = 0
+    for o in new:
+        o.Remove()
+        if o.GetType() == c4d.Onull and o.GetName().lower().endswith(".obj"):
+            children = []
+            c = o.GetDown()
+            while c:
+                children.append(c)
+                c = c.GetNext()
+            for c in children:
+                c.Remove()
+                c.InsertUnderLast(root)
+                n += 1
+        else:
+            o.InsertUnderLast(root)
+            n += 1
+    return n
+
+
 def import_export(doc, p, export_id, folder=None):
     """
-    Lädt die Dateien eines Exports in den Speicherordner (Unterordner je Export),
-    importiert die GLBs unter ein Null-Objekt mit Georeferenz und verknüpft die
-    Texturen absolut unter <Ordner>/tex.
+    Lädt die Dateien eines Exports in den Speicherordner (Unterordner je Export) und
+    importiert sie unter ein Null-Objekt mit Georeferenz: bevorzugt die OBJ (Materialien
+    aus der MTL, Höhenlinien als Splines), sonst die GLBs; Texturen liegen absolut unter
+    <Ordner>/tex.
     """
     job = api(p, f"/api/exports/{export_id}")
     if job.get("state") != "done":
@@ -569,8 +745,12 @@ def import_export(doc, p, export_id, folder=None):
             with open(path, "r", encoding="utf-8") as fh:
                 prov = json.load(fh)
     glbs = [f["name"] for f in files if f["name"].endswith(".glb")]
-    if not glbs:
-        raise RuntimeError("Export enthält keine GLB")
+    objs = [f["name"] for f in files if f["name"].endswith(".obj")]
+    use_obj = bool(objs) and p.get("prefer_obj", True)
+    if not glbs and not objs:
+        raise RuntimeError("Export enthält weder OBJ noch GLB")
+    if p.get("prefer_obj", True) and not objs:
+        log(f"Export „{name}“ hat keine OBJ (beim Export „OBJ“ anhaken), nehme die GLB")
     georef = None
     for f in (prov or {}).get("files", []):
         if f.get("georef"):
@@ -584,38 +764,38 @@ def import_export(doc, p, export_id, folder=None):
     doc.AddUndo(c4d.UNDOTYPE_NEW, root)
     imported = 0
     mats_before = list(doc.GetMaterials())  # C4DAtom vergleicht den zugrunde liegenden Zeiger
-    for g in glbs:
+    sources = objs if use_obj else glbs
+    for g in sources:
         path = os.path.join(folder, g)
         before = _top_guids(doc)
-        ok = c4d.documents.MergeDocument(
-            doc, path, c4d.SCENEFILTER_OBJECTS | c4d.SCENEFILTER_MATERIALS | c4d.SCENEFILTER_MERGESCENE, None
-        )
+        if use_obj:
+            ok = import_obj(doc, path)
+        else:
+            ok = c4d.documents.MergeDocument(
+                doc, path, c4d.SCENEFILTER_OBJECTS | c4d.SCENEFILTER_MATERIALS | c4d.SCENEFILTER_MERGESCENE, None
+            )
         if not ok:
             raise RuntimeError(f"Import von {g} fehlgeschlagen")
-        new = [o for o in doc.GetObjects() if o.GetGUID() not in before and o is not root]
-        for o in new:
-            o.Remove()
-            o.InsertUnderLast(root)
-            imported += 1
+        imported += _reparent_new(doc, before, root)
     new_mats = [m for m in doc.GetMaterials() if all(m != b for b in mats_before)]
     search = [folder, os.path.join(folder, "tex"), tempfile.gettempdir(), doc.GetDocumentPath() or ""]
     for g in glbs:
         search.append(os.path.join(folder, os.path.splitext(g)[0]))
         search.append(os.path.join(folder, os.path.splitext(g)[0] + "_tex"))
     relinked = relink_textures(doc, new_mats, folder, [d for d in search if d])
-    print(f"[gisloader] {relinked} Textur(en) verknüpft unter {os.path.join(folder, 'tex')}")
+    log(f"{imported} Objekte aus {'OBJ' if use_obj else 'GLB'}, {relinked} Textur(en) verknüpft unter {os.path.join(folder, 'tex')}")
     if p.get("corona") and corona_available():
         try:
             n_corona = convert_to_corona(doc, root, [os.path.join(folder, g) for g in glbs], new_mats, os.path.join(folder, "tex"))
-            print(f"[gisloader] {n_corona} Material(ien) durch Corona-Materialien ersetzt")
+            log(f"{n_corona} Material(ien) durch Corona-Materialien ersetzt")
         except Exception as e:
             import traceback
 
-            print("[gisloader] Corona-Umwandlung fehlgeschlagen:", repr(e))
-            traceback.print_exc()
+            log("Corona-Umwandlung fehlgeschlagen: " + repr(e) + "\n" + traceback.format_exc())
     _add_userdata(root, "gisloader_export_id", export_id)
     _add_userdata(root, "gisloader_server", p["server"])
     _add_userdata(root, "gisloader_folder", folder)
+    _add_userdata(root, "gisloader_source", "obj" if use_obj else "glb")
     if prov:
         _add_userdata(root, "attribution", prov.get("attribution", ""))
         region = prov.get("region") or {}
@@ -665,7 +845,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/ping"):
-            self._json(200, {"app": "cinema4d", "version": str(c4d.GetC4DVersion()), "addon": VERSION, "port": _bridge_port})
+            self._json(200, {"app": "cinema4d", "version": str(c4d.GetC4DVersion()), "addon": VERSION, "port": _bridge_port, "busy": BRIDGE_STATE["busy"], "last": BRIDGE_STATE["last"]})
         else:
             self._json(404, {"error": "unbekannt"})
 
@@ -680,6 +860,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
         if not data.get("exportId"):
             return self._json(400, {"error": "exportId fehlt"})
         IMPORT_QUEUE.put(data)
+        BRIDGE_STATE["busy"] = True
+        log(f"Brücke: Import {data.get('exportId')} von {data.get('server')} angefordert")
         if _on_queued:
             _on_queued()
         self._json(202, {"queued": True})
@@ -728,20 +910,32 @@ def bridge_port():
 
 
 def drain_queue(doc, p, choose_folder=None):
-    """Im Hauptthread: alle wartenden Importe ausführen; choose_folder(p) liefert den Ordner oder None (Abbruch)."""
+    """
+    Im Hauptthread: alle wartenden Importe ausführen; choose_folder(p) liefert den Ordner
+    oder None (Abbruch). Ergebnis je Import landet in BRIDGE_STATE["last"] (für /ping und
+    die Rückmeldung in der Web-App) und in der Liste (root, n) der gelungenen Importe.
+    """
     done = []
     try:
         while True:
             data = IMPORT_QUEUE.get_nowait()
+            export_id = data.get("exportId", "")
             server = data.get("server")
             if server and server.rstrip("/") != p["server"].rstrip("/"):
-                print(f"[gisloader] Import abgelehnt: Server {server} ≠ {p['server']}")
+                set_last(export_id, False, f"abgelehnt: Server {server} ≠ {p['server']} (Server im Plugin prüfen)")
                 continue
-            folder = choose_folder(p) if choose_folder else None
-            if choose_folder and folder is None:
-                print("[gisloader] Import abgebrochen (kein Ordner gewählt)")
-                continue
-            done.append(import_export(doc, p, data["exportId"], folder))
+            try:
+                folder = choose_folder(p) if choose_folder else None
+                if choose_folder and folder is None:
+                    set_last(export_id, False, "abgebrochen (kein Ordner gewählt)")
+                    continue
+                root, n = import_export(doc, p, export_id, folder)
+                set_last(export_id, True, f"{n} Objekte unter „{root.GetName()}“")
+                done.append((root, n))
+            except Exception as e:
+                set_last(export_id, False, describe_error(e))
     except queue.Empty:
         pass
+    finally:
+        BRIDGE_STATE["busy"] = False
     return done

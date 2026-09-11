@@ -9,7 +9,7 @@
 	<key>CFBundleExecutable</key>
 	<string>gisloader</string>
 	<key>CFBundleGetInfoString</key>
-	<string>gisloader 0.1.13, Copyright © 2026 Alexander Pfeiffer.</string>
+	<string>gisloader 0.1.14, Copyright © 2026 Alexander Pfeiffer.</string>
 	<key>CFBundleIconFile</key>
 	<string>ArchiCADPlugin.icns</string>
 	<key>CFBundleIdentifier</key>

@@ -18,6 +18,10 @@ die enthaltenen Plugin-Versionen.
   Corona-Bitmap › File), geprüft mit Corona 13; Protokolldatei
   `gisloader.log` und Knopf „Protokoll“; Fehler der Brücke als Dialog.
 - Rhino 0.1.14: Werkzeugleiste mit gisloader-Symbolen (hell/dunkel).
+- Archicad 0.1.14: Windows-Fassung (`.apx`) ließ sich nicht laden („weder ein
+  Add-On noch Veraltetes“), weil der Windows-Ressourcendatei die Einbindung
+  der Add-on-Ressourcen (Kennung, Menü, Palette) fehlte; behoben. macOS
+  unverändert, nur neue Versionsnummer.
 
 ## 8. September 2026
 

@@ -1,1 +1,11 @@
+/* *****************************************************************************
+// gisloader für Archicad: Windows-Ressourcen. Die aus RINT/*.grc und RFIX/*.grc
+// erzeugten .rc2 (ResConv, Ordner ResourceObjects) müssen hier eingebunden
+// werden, sonst fehlen MDID, Menü und Palette in der .apx und Archicad meldet
+// „weder ein Add-On noch Veraltetes“.
+// ****************************************************************************/
+
+#include "gisloader.grc.rc2"
+#include "gisloaderFix.grc.rc2"
+
 1	ICON	LOADONCALL MOVEABLE IMPURE	ACAP.ico

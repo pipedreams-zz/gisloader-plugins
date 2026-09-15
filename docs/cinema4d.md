@@ -36,8 +36,9 @@ Exports (Materialien aus der MTL, Höhenlinien als Splines); fehlt sie, die GLB.
   von Cinema 4D bekommt dafür feste Einstellungen: Meter als Einheit,
   Materialien aus der MTL (Farbe `Kd`, Textur `map_Kd` als Bitmap-Shader),
   ein Objekt je Ebene und Gebäudeteil, Höhenlinien und Flurstücksgrenzen als
-  Splines. Eine Z-up-OBJ wird beim Import gedreht (Y und Z tauschen), eine
-  Y-up-OBJ nicht; das Ergebnis ist in beiden Fällen X = Ost, Y = Höhe,
+  Splines. Eine Z-up-OBJ wird beim Import gedreht (nur Y und Z tauschen, keine
+  Spiegelung, wie beim OBJ-Import aus Archicad), eine Y-up-OBJ nicht; das
+  Ergebnis ist in beiden Fällen X = Ost, Y = Höhe,
   Z = −Nord wie bei glTF. Die Importer-Einstellungen werden danach
   zurückgesetzt.
 - Ohne OBJ im Export (oder ohne Häkchen) kommt die GLB über den
@@ -73,7 +74,7 @@ je Material gefunden hat, steht im Protokoll.
 
 ### Georeferenz
 
-- Cinema 4D und glTF sind Y-up: X = Ost, Y = Höhe, Z = −Nord. Dokumenteinheit
+- Cinema 4D ist Y-up und linkshändig: X = Ost, Y = Höhe, Z = Nord (seit 0.1.15; bis 0.1.14 war das Modell an Z gespiegelt). Dokumenteinheit
   ist Zentimeter; der glTF-Import rechnet Meter um.
 - Weltkoordinate (Meter) = lokale Koordinate / 100 + `origin_x/y/z` im System
   `crs`, dabei gilt Nord = −Z.

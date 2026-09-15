@@ -22,6 +22,7 @@ import struct
 import tempfile
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,7 +34,7 @@ try:
 except ImportError:  # pragma: no cover – alte Versionen ohne Node-API
     maxon = None
 
-VERSION = "0.1.14"
+VERSION = "0.1.15"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Cinema 4D nimmt den ersten freien Port ab 47810 (bis +9); Blender liegt ab 47800.
 BRIDGE_PORT = 47810
@@ -44,6 +45,7 @@ _ssl_ctx = None
 DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Downloads", "gisloader")
 
 PERIODS = [
+    ("today", "Heute"),
     ("week", "Diese Woche"),
     ("month", "Dieser Monat"),
     ("year", "Dieses Jahr"),
@@ -79,7 +81,9 @@ def in_period(created_iso, period):
     except ValueError:
         return True
     now = datetime.datetime.now().astimezone()
-    if period == "week":
+    if period == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "week":
         start = (now - datetime.timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
     elif period == "month":
         start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -278,11 +282,22 @@ def export_folder(base, export_id, name):
 # ── Import ──────────────────────────────────────────────────────────────
 
 
+
+# Signierte Freigabe-Links: die Web-App schickt beim „Senden an …“ ein kurzlebiges Token
+# mit, damit der Import auch klappt, wenn das Plugin mit einem anderen Konto angemeldet
+# ist als der Browser. Je Export ein Token; Abfrage und Downloads hängen es an.
+SHARE_TOKENS = {}
+
+
+def _q(export_id):
+    t = SHARE_TOKENS.get(export_id)
+    return "?token=" + urllib.parse.quote(t) if t else ""
+
 def _download(p, export_id, name, folder):
     path = os.path.join(folder, name)
     if not os.path.exists(path):
         with open(path, "wb") as f:
-            f.write(api(p, f"/api/exports/{export_id}/files/{name}", raw=True, timeout=600))
+            f.write(api(p, f"/api/exports/{export_id}/files/{name}{_q(export_id)}", raw=True, timeout=600))
     return path
 
 
@@ -466,10 +481,12 @@ def _relink_node_material(doc, mat, tex_dir):
 CORONA_PHYSICAL_MTL = 1056306  # Corona Physical Material (ab Corona 7)
 CORONA_LEGACY_MTL = 1032100  # Corona Material (klassisch)
 CORONA_BITMAP = 1036473  # Corona Bitmap Shader
-# Parameter-IDs aus der Beschreibung der Materialien (Corona 13, Cinema 4D 2026):
-# Physical: Base layer › Color (Farbe) und Texture; Legacy: Diffuse › Color und Texture.
-CORONA_PHYSICAL_COLOR = 20227
-CORONA_PHYSICAL_TEXTURE = 20228
+# Parameter-IDs aus der Beschreibung der Materialien (Corona 13, Cinema 4D 2026, per c4dpy
+# ausgelesen): Physical: CORONA_PHYSICAL_MATERIAL_BASE_COLOR 20201 und …_BASE_COLOR_TEXTURE 20202
+# (20227/20228 sind die Kantenfarbe „Edge color“, deshalb blieben die Materialien bis 0.1.14 weiß);
+# Legacy: CORONA_DIFFUSE_COLOR 4300, CORONA_DIFFUSE_TEXTURE 4301.
+CORONA_PHYSICAL_COLOR = 20201
+CORONA_PHYSICAL_TEXTURE = 20202
 CORONA_LEGACY_COLOR = 4300
 CORONA_LEGACY_TEXTURE = 4301
 CORONA_BITMAP_FILE = 11520
@@ -656,9 +673,10 @@ def import_obj(doc, path):
     """
     OBJ des Exports einfügen: Meter → Dokumenteinheit, Materialien aus der MTL (Kd, map_Kd),
     ein Objekt je „o“, Linien als Splines. Die gisloader-OBJ ist Z-up (X Ost, Y Nord, Z Höhe);
-    mit „Y und Z tauschen“ (Z-Achse bleibt gespiegelt) entsteht wie bei glTF X = Ost,
-    Y = Höhe, Z = −Nord (in c4dpy geprüft). Y-up-OBJ: kein Tausch, keine Spiegelung.
-    Die Importer-Einstellungen werden danach zurückgesetzt.
+    nur „Y und Z tauschen“ ergibt im linkshändigen Cinema 4D X = Ost, Y = Höhe, Z = Nord,
+    wie der Archicad-OBJ-Import (in c4dpy geprüft; ein zusätzliches „Flip Z“ spiegelte das
+    Modell bis 0.1.14). Y-up-OBJ: kein Tausch, keine Spiegelung. Die Importer-Einstellungen
+    werden danach zurückgesetzt.
     """
     bc = _obj_import_settings()
     if bc is None:
@@ -685,7 +703,7 @@ def import_obj(doc, path):
         bc[c4d.OBJIMPORTOPTIONS_MATERIAL] = c4d.OBJIMPORTOPTIONS_MATERIAL_MTLFILE
         bc[c4d.OBJIMPORTOPTIONS_SPLITBY] = c4d.OBJIMPORTOPTIONS_SPLITBY_OBJECT
         bc[c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_SWAPYZ] = up == "Z"
-        bc[c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_FLIPZ] = up == "Z"
+        bc[c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_FLIPZ] = False
         bc[c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_FLIPX] = False
         bc[c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_FLIPY] = False
         bc[c4d.OBJIMPORTOPTIONS_POINTTRANSFORM_SWAPXY] = False
@@ -730,7 +748,7 @@ def import_export(doc, p, export_id, folder=None):
     aus der MTL, Höhenlinien als Splines), sonst die GLBs; Texturen liegen absolut unter
     <Ordner>/tex.
     """
-    job = api(p, f"/api/exports/{export_id}")
+    job = api(p, f"/api/exports/{export_id}{_q(export_id)}")
     if job.get("state") != "done":
         raise RuntimeError(f"Export ist {job.get('state')}")
     files = job.get("files", [])
@@ -808,7 +826,7 @@ def import_export(doc, p, export_id, folder=None):
         _add_userdata(root, "origin_x", float(origin.get("x", 0)))
         _add_userdata(root, "origin_y", float(origin.get("y", 0)))
         _add_userdata(root, "origin_z", float(origin.get("z", 0)))
-        _add_userdata(root, "axis_note", "X = Ost, Y = Höhe, Z = −Nord (Y-up); Ursprung Südwest-Ecke des Ausschnitts; Einheit im Dokument cm")
+        _add_userdata(root, "axis_note", "X = Ost, Y = Höhe, Z = Nord (Cinema 4D, linkshändig); Ursprung Südwest-Ecke des Ausschnitts; Einheit im Dokument cm")
     doc.EndUndo()
     c4d.EventAdd()
     return root, imported
@@ -920,6 +938,8 @@ def drain_queue(doc, p, choose_folder=None):
         while True:
             data = IMPORT_QUEUE.get_nowait()
             export_id = data.get("exportId", "")
+            if data.get("token"):
+                SHARE_TOKENS[export_id] = data["token"]
             server = data.get("server")
             if server and server.rstrip("/") != p["server"].rstrip("/"):
                 set_last(export_id, False, f"abgelehnt: Server {server} ≠ {p['server']} (Server im Plugin prüfen)")

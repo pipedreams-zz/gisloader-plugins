@@ -4,6 +4,19 @@ Jedes Plugin zählt seine Version eigenständig und wird nur hochgezählt, wenn
 sich sein Code ändert. Releases im Plugin-Repo tragen ein Datum und nennen
 die enthaltenen Plugin-Versionen.
 
+## 16. September 2026
+
+- Blender, Cinema 4D, Rhino 0.1.15: Filter „Heute“ in der Exportliste;
+  „An … senden“ aus der Web-App funktioniert auch, wenn das Plugin mit einem
+  anderen Konto angemeldet ist als der Browser (die Web-App schickt ein
+  einstündiges Freigabe-Token mit; bisher „HTTP 404: Job unbekannt“). Ohne
+  Token nennt die API den Grund („gehört einem anderen Konto, angemeldet als …“).
+- Cinema 4D 0.1.15: OBJ-Import ohne Spiegelung (nur Y und Z tauschen; Cinema 4D
+  ist linkshändig, „Flip Z“ spiegelte das Modell an der blauen Achse);
+  Corona-Materialien bekommen wieder Farbe und Textur (die Parameter-IDs
+  20227/20228 waren die Kantenfarbe, richtig sind Base layer › Color 20201 und
+  Texture 20202, per c4dpy aus der Beschreibung gelesen).
+
 ## 11. September 2026
 
 - Blender, Cinema 4D, Rhino 0.1.14: Kontoauswahl „Alle Konten | Persönlich |

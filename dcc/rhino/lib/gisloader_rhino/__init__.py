@@ -23,6 +23,7 @@ import ssl
 import tempfile
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,7 +34,7 @@ import System
 import Eto.Drawing as drawing
 import Eto.Forms as forms
 
-VERSION = "0.1.14"
+VERSION = "0.1.15"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Rhino nimmt den ersten freien Port ab 47820 (bis +9); Blender ab 47800, Cinema 4D ab 47810.
 BRIDGE_PORT = 47820
@@ -41,7 +42,7 @@ BRIDGE_PORT_SPAN = 10
 DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Downloads", "gisloader")
 STICKY = "gisloader.rhino"
 
-PERIODS = [("week", "Diese Woche"), ("month", "Dieser Monat"), ("year", "Dieses Jahr"), ("all", "Alle")]
+PERIODS = [("today", "Heute"), ("week", "Diese Woche"), ("month", "Dieser Monat"), ("year", "Dieses Jahr"), ("all", "Alle")]
 
 
 def state():
@@ -156,7 +157,9 @@ def in_period(created_iso, period):
     except ValueError:
         return True
     now = datetime.datetime.now().astimezone()
-    if period == "week":
+    if period == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "week":
         start = (now - datetime.timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
     elif period == "month":
         start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -255,11 +258,22 @@ def export_folder(base, export_id, name):
     return folder
 
 
+
+# Signierte Freigabe-Links: die Web-App schickt beim „Senden an …“ ein kurzlebiges Token
+# mit, damit der Import auch klappt, wenn das Plugin mit einem anderen Konto angemeldet
+# ist als der Browser. Je Export ein Token; Abfrage und Downloads hängen es an.
+SHARE_TOKENS = {}
+
+
+def _q(export_id):
+    t = SHARE_TOKENS.get(export_id)
+    return "?token=" + urllib.parse.quote(t) if t else ""
+
 def _download(p, export_id, name, folder):
     path = os.path.join(folder, name)
     if not os.path.exists(path):
         with open(path, "wb") as f:
-            f.write(api(p, f"/api/exports/{export_id}/files/{name}", raw=True, timeout=600))
+            f.write(api(p, f"/api/exports/{export_id}/files/{name}{_q(export_id)}", raw=True, timeout=600))
     return path
 
 
@@ -428,7 +442,7 @@ def _flatten_building_layers(doc, new_objs, new_layers):
 
 
 def import_export(doc, p, export_id, folder=None):
-    job = api(p, f"/api/exports/{export_id}")
+    job = api(p, f"/api/exports/{export_id}{_q(export_id)}")
     if job.get("state") != "done":
         raise RuntimeError(f"Export ist {job.get('state')}")
     files = job.get("files", [])
@@ -646,6 +660,8 @@ def drain_queue():
             except queue.Empty:
                 return
             export_id = data.get("exportId", "")
+            if data.get("token"):
+                SHARE_TOKENS[export_id] = data["token"]
             server = data.get("server")
             if server and server.rstrip("/") != p["server"].rstrip("/"):
                 set_last(export_id, False, f"abgelehnt: Server {server} ≠ {p['server']} (Server im Plugin prüfen)")

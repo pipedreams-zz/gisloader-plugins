@@ -28,6 +28,7 @@ import ssl
 import tempfile
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -35,7 +36,7 @@ import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 
 ADDON_ID = __package__ or __name__
-ADDON_VERSION = "0.1.14"
+ADDON_VERSION = "0.1.15"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Blender-Instanzen nehmen den ersten freien Port ab 47800 (bis +9); Cinema 4D ab 47810.
 BRIDGE_PORT_SPAN = 10
@@ -82,6 +83,7 @@ def export_folder(base, export_id, name):
 
 
 PERIODS = [
+    ("today", "Heute", "Exporte von heute"),
     ("week", "Diese Woche", "Exporte seit Montag dieser Woche"),
     ("month", "Dieser Monat", "Exporte seit dem 1. dieses Monats"),
     ("year", "Dieses Jahr", "Exporte seit dem 1. Januar"),
@@ -98,7 +100,9 @@ def in_period(created_iso, period):
     except ValueError:
         return True
     now = datetime.datetime.now().astimezone()
-    if period == "week":
+    if period == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "week":
         start = (now - datetime.timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
     elif period == "month":
         start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -404,11 +408,22 @@ class GISLOADER_UL_exports(bpy.types.UIList):
 # ── Import ──────────────────────────────────────────────────────────────
 
 
+
+# Signierte Freigabe-Links: die Web-App schickt beim „Senden an …“ ein kurzlebiges Token
+# mit, damit der Import auch klappt, wenn das Plugin mit einem anderen Konto angemeldet
+# ist als der Browser. Je Export ein Token; Abfrage und Downloads hängen es an.
+SHARE_TOKENS = {}
+
+
+def _q(export_id):
+    t = SHARE_TOKENS.get(export_id)
+    return "?token=" + urllib.parse.quote(t) if t else ""
+
 def _download(p, export_id, name, folder):
     path = os.path.join(folder, name)
     if not os.path.exists(path):
         with open(path, "wb") as f:
-            f.write(api(p, f"/api/exports/{export_id}/files/{name}", raw=True, timeout=600))
+            f.write(api(p, f"/api/exports/{export_id}/files/{name}{_q(export_id)}", raw=True, timeout=600))
     return path
 
 
@@ -443,7 +458,7 @@ def _relink_textures(images, tex_dir):
 
 def import_export(context, export_id, report, folder=None):
     p = prefs(context)
-    job = api(p, f"/api/exports/{export_id}")
+    job = api(p, f"/api/exports/{export_id}{_q(export_id)}")
     if job.get("state") != "done":
         raise RuntimeError(f"Export ist {job.get('state')}")
     files = job.get("files", [])
@@ -629,6 +644,8 @@ def _poll_queue():
         while True:
             data = IMPORT_QUEUE.get_nowait()
             export_id = data.get("exportId", "")
+            if data.get("token"):
+                SHARE_TOKENS[export_id] = data["token"]
             server = data.get("server")
             p = prefs()
             if server and server.rstrip("/") != p.server.rstrip("/"):

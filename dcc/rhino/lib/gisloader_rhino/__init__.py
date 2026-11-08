@@ -34,7 +34,7 @@ import System
 import Eto.Drawing as drawing
 import Eto.Forms as forms
 
-VERSION = "0.1.15"
+VERSION = "0.1.16"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Rhino nimmt den ersten freien Port ab 47820 (bis +9); Blender ab 47800, Cinema 4D ab 47810.
 BRIDGE_PORT = 47820
@@ -318,8 +318,8 @@ UTM_ZONES = {25832: 32, 25833: 33, 4647: 32}
 # ── Import ──────────────────────────────────────────────────────────────
 
 
-def _glb_materials(path):
-    """Materialnamen der GLB mit Texturkennung (JSON-Chunk)."""
+def _glb_json(path):
+    """JSON-Chunk einer GLB; leeres dict, wenn die Datei keine GLB ist."""
     import struct
 
     with open(path, "rb") as f:
@@ -329,8 +329,54 @@ def _glb_materials(path):
         n, t = struct.unpack("<II", f.read(8))
         if t != 0x4E4F534A:
             return {}
-        gltf = json.loads(f.read(n).decode("utf-8"))
+        return json.loads(f.read(n).decode("utf-8"))
+
+
+def _glb_materials(path):
+    """Materialnamen der GLB mit Texturkennung (JSON-Chunk)."""
+    gltf = _glb_json(path)
     return {m.get("name", ""): "baseColorTexture" in m.get("pbrMetallicRoughness", {}) for m in gltf.get("materials", [])}
+
+
+def _glb_node_extras(path):
+    """Extras der Knoten mit Netz, nach Knotenname (z. B. Attribute von „ALKIS Detail“)."""
+    gltf = _glb_json(path)
+    return {
+        n["name"]: n["extras"]
+        for n in gltf.get("nodes", [])
+        if "mesh" in n and n.get("name") and isinstance(n.get("extras"), dict) and n["extras"]
+    }
+
+
+def _apply_extras(doc, new_objs, extras):
+    """
+    Attribute aus den GLB-Extras als Benutzertexte an die Objekte (der glTF-Importer
+    von Rhino übernimmt sie nicht). Punktwolken aus einem Punkt (Grenzpunkte,
+    Einzelbäume) werden zu Punkten mit denselben Attributen. Liefert (Objekte, Punkte).
+    """
+    tagged = points = 0
+    for o in new_objs:
+        # Frisch holen: ModifyAttributes ersetzt Objekte, und Benutzertexte über
+        # ModifyAttributes gingen in Rhino 8 verloren (geprüft); direkt am Objekt bleiben sie.
+        obj = doc.Objects.FindId(o.Id)
+        if obj is None:
+            continue
+        e = extras.get(obj.Attributes.Name or "")
+        geo = obj.Geometry
+        if isinstance(geo, Rhino.Geometry.PointCloud) and geo.Count == 1:
+            attrs = obj.Attributes.Duplicate()
+            for k, v in (e or {}).items():
+                attrs.SetUserString(str(k), str(v))
+            if doc.Objects.AddPoint(geo[0].Location, attrs) != System.Guid.Empty:
+                doc.Objects.Delete(obj, True)
+                points += 1
+                tagged += 1 if e else 0
+                continue
+        if e:
+            for k, v in e.items():
+                obj.Attributes.SetUserString(str(k), str(v))
+            tagged += 1
+    return tagged, points
 
 
 def _relink_textures(doc, mats_before, folder, glbs):
@@ -400,13 +446,18 @@ def _kind_of(doc, obj):
     return "Sonstige"
 
 
-def _flatten_building_layers(doc, new_objs, new_layers):
+def _flatten_building_layers(doc, new_objs, new_layers, root_id):
     """
     Der glTF-Importer legt je Gebäude eine Ebene an (gml:id). Für Rhino genügt je
     Bauteilart eine Ebene (Gebaeude/Dach, Gebaeude/Wand …); die gml:id bleibt als
     Benutzertext am Objekt, die leeren Gebäudeebenen verschwinden.
     """
-    parents = [l for l in new_layers if (l.Name or "").lower() in ("gebaeude", "gebäude", "buildings")]
+    # Nur die oberste Ebene „Gebaeude“ (LoD2), nicht die gleichnamige Objektart unter ALKIS_Detail.
+    parents = [
+        l
+        for l in new_layers
+        if (l.Name or "").lower() in ("gebaeude", "gebäude", "buildings") and l.ParentLayerId == root_id
+    ]
     if not parents:
         return 0
     parent = parents[0]
@@ -432,8 +483,10 @@ def _flatten_building_layers(doc, new_objs, new_layers):
                 kind_layers[kind] = doc.Layers.Add(layer)
         attrs = o.Attributes
         attrs.LayerIndex = kind_layers[kind]
-        attrs.SetUserString("gml_id", src.Name or "")
         doc.Objects.ModifyAttributes(o, attrs, True)
+        moved_obj = doc.Objects.FindId(o.Id)
+        if moved_obj is not None:
+            moved_obj.Attributes.SetUserString("gml_id", src.Name or "")
         moved += 1
     for idx, layer in building_layers.items():
         if not doc.Objects.FindByLayer(layer):
@@ -497,7 +550,11 @@ def import_export(doc, p, export_id, folder=None):
             attrs.SetUserString("attribution", prov.get("attribution", ""))
         doc.Objects.ModifyAttributes(o, attrs, True)
 
-    _flatten_building_layers(doc, new_objs, new_layers)
+    _flatten_building_layers(doc, new_objs, new_layers, parent_id)
+    extras = {}
+    for g in glbs:
+        extras.update(_glb_node_extras(os.path.join(folder, g)))
+    tagged, points = _apply_extras(doc, new_objs, extras) if extras else (0, 0)
     new_layers = [l for l in doc.Layers if l.Id not in layers_before and not l.IsDeleted]
     relinked = _relink_textures(doc, mats_before, folder, glbs)
 
@@ -533,6 +590,8 @@ def import_export(doc, p, export_id, folder=None):
     state()["last"] = {
         "name": name,
         "objects": len(new_objs),
+        "attributed": tagged,
+        "points": points,
         "layers": [l.FullPath for l in new_layers],
         "relinked": relinked,
         "folder": folder,

@@ -40,6 +40,13 @@ des Importers (Nutzung mit Unterebenen, Flurstücke, Bauwerke) und „Gebaeude�
 mit je einer Ebene pro Bauteilart (Dach, Wand, Boden, Grundriss); die gml:id
 jedes Gebäudes steht als Benutzertext `gml_id` am Objekt.
 
+„ALKIS Detail“ (NRW) liegt unter `ALKIS_Detail › Abschnitt › Objektart`, die
+flache Fassung der Option „2D-Ebenen zusätzlich auf der Nullebene“ unter
+`Plan_2D`. Jedes Objekt trägt seine Attribute als Benutzertexte (`gmlId`,
+`objektart`, Klartext und `<Attribut>_code`, bei Gebäuden `adresse`, bei
+Grenzpunkten `punktkennung` und `abmarkung_Marke`); Grenzpunkte und
+Einzelbäume sind Punkte.
+
 ### Georeferenz
 
 - Rhino ist Z-up und dreht glTF (Y-up) beim Import: X = Ost, Y = Nord,

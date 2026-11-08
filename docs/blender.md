@@ -29,6 +29,15 @@ ist, an der Szene in der Form von BlenderGIS (`crs`, `crsx`, `crsy`).
 - „gisloader im Browser“ öffnet die Web-App mit dem eingestellten Server.
 - Die Versionsnummer des Add-ons steht im Panel-Titel.
 
+### ALKIS Detail und Lageplan
+
+„ALKIS Detail“ (NRW) kommt als Empty-Hierarchie `ALKIS_Detail › Abschnitt ›
+Objektart`, die flache Fassung der Option „2D-Ebenen zusätzlich auf der
+Nullebene“ unter `Plan_2D`. Die Attribute jedes Objekts (`adresse`,
+`punktkennung`, Klartext und `<Attribut>_code` …) stehen als Eigenschaften im
+Objekt-Panel. Grenzpunkte und Einzelbäume sind kleine Kugel-Empties an der
+Punktlage, weil Blender reine Punktnetze nur im Bearbeitungsmodus zeigt.
+
 ### Speicherordner und Texturen
 
 - In den Add-on-Einstellungen steht der Speicherordner (Vorgabe

@@ -41,6 +41,11 @@ Exports (Materialien aus der MTL, Höhenlinien als Splines); fehlt sie, die GLB.
   Ergebnis ist in beiden Fällen X = Ost, Y = Höhe,
   Z = −Nord wie bei glTF. Die Importer-Einstellungen werden danach
   zurückgesetzt.
+- „ALKIS Detail“ (NRW) und die flache Fassung `Plan_2D` ordnet das Plugin
+  nach dem OBJ-Import in Null-Gruppen (Abschnitt › Objektart), benennt die
+  Objekte nach der gml:id und hängt die Attribute aus der GLB als User Data
+  an (etwa `adresse`, `punktkennung`). Punkte, die der OBJ-Importer leer
+  anlegt, werden zu Null-Objekten an der Punktlage.
 - Ohne OBJ im Export (oder ohne Häkchen) kommt die GLB über den
   glTF-Importer. Eingebettete Texturen liegen dann auf einer Ramdisk des
   Importers, das Plugin sichert sie nach `tex/`; Node-Materialien mit

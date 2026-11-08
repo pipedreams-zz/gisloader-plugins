@@ -4,6 +4,30 @@ Jedes Plugin zählt seine Version eigenständig und wird nur hochgezählt, wenn
 sich sein Code ändert. Releases im Plugin-Repo tragen ein Datum und nennen
 die enthaltenen Plugin-Versionen.
 
+## 6. November 2026
+
+Alle Plugins verstehen die neue Export-Ebene „ALKIS Detail“ (NRW) und die
+Option „2D-Ebenen zusätzlich auf der Nullebene“ (Knoten `Plan_2D`).
+
+- Archicad 0.1.15: Ebenen je Abschnitt („gisloader ALKIS Gebäudedetail“,
+  „… Grundstück“ usw.), Flächen als Morphs, Linien als Polylinien, Punkte als
+  Hotspots; Grenzpunkte bekommen ihre kurze Punktnummer als Text daneben (die
+  volle Punktkennung bleibt Attribut des Exports). Die flache
+  Fassung landet auf eigenen Ebenen „gisloader 2D …“: Flächen als Schraffuren
+  (Umriss mit Löchern, vollflächig in der Farbe des Abschnitts und mit Kontur;
+  Gebäude über Straßen), Linien als Polylinien im Stift ihrer Farbe, Punkte als
+  Hotspots. Nach dem Import zoomt der Grundriss auf den Ausschnitt. Bau unter
+  Xcode 27 (Zielversion macOS 12).
+- Blender 0.1.16: Einzelpunkte (Grenzpunkte, Einzelbäume) werden zu Empties
+  mit allen Attributen; Blender zeigte die Punktnetze nur im Bearbeitungsmodus.
+  Attribute stehen wie bisher als Eigenschaften am Objekt.
+- Rhino 0.1.16: Attribute aus der GLB als Benutzertexte (der glTF-Importer von
+  Rhino übernimmt sie nicht), Einzelpunkte als Punkte statt Punktwolken. Behoben:
+  die `gml_id` der LoD2-Gebäude kam seit 0.1.11 nicht am Objekt an.
+- Cinema 4D 0.1.16: ALKIS Detail und `Plan_2D` als Null-Gruppen nach Abschnitt
+  und Objektart, Objekte nach gml:id benannt, Attribute als User Data;
+  Punkte (der OBJ-Importer liefert sie leer) als Null-Objekte an der Punktlage.
+
 ## 16. September 2026
 
 - Blender, Cinema 4D, Rhino 0.1.15: Filter „Heute“ in der Exportliste;

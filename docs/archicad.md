@@ -29,6 +29,24 @@ Georeferenz des Ausschnitts.
   Oberflächen gleichen Namens bleiben unverändert, eigene Farbanpassungen
   gehen bei weiteren Importen also nicht verloren.
 - Flurstücksgrenzen und Höhenlinien als Polylinien im Grundriss.
+- „ALKIS Detail“ (NRW) auf je einer Ebene pro Abschnitt, etwa „gisloader ALKIS
+  Gebäudedetail“ oder „gisloader ALKIS Grundstück“: Flächen als Morphs, Linien
+  als Polylinien, Punkte (Grenzpunkte, Einzelbäume) als Hotspots auf
+  Geländehöhe. Grenzpunkte tragen ihre Punktnummer als Text daneben: nur die
+  letzten fünf Stellen der Punktkennung ohne führende Nullen (aus
+  322945628227552 wird 27552). Die volle 15-stellige Punktkennung steht im
+  Export (Attribut `punktkennung` in der GLB); Hotspots haben in Archicad keine
+  Element-ID, die sie aufnehmen könnte.
+- Mit der Export-Option „2D-Ebenen zusätzlich auf der Nullebene“ kommt eine
+  flache Fassung auf eigene Ebenen „gisloader 2D …“: Flächen als Schraffuren
+  mit ihren Löchern, Linien als Polylinien, Punkte als Hotspots auf Höhe 0.
+  So lässt sich der Lageplan getrennt vom Geländemodell ein- und ausblenden.
+  Die Schraffuren sind vollflächig in der aufgehellten Farbe ihres Abschnitts
+  gefüllt und haben eine Kontur im Stift, der der dunkleren Farbe am nächsten
+  kommt: Gebäude kräftig, Straßenraum hell, Vegetation grün; Rechte bleiben
+  ungefüllt, damit sie nichts verdecken. Gebäude liegen über Straßen und
+  Vegetation. Linien bekommen den Stift ihrer Farbe.
+- Nach dem Import zoomt der Grundriss auf den Ausschnitt.
 
 ### Georeferenz
 

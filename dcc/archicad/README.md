@@ -14,13 +14,29 @@ Natives Add-on (C++, Archicad API DevKit 28). Die Benutzeranleitung steht in
   jede Funktion nimmt einen String). Die Web-App zeigt im Embed-Modus den
   Knopf „In Archicad importieren“, lädt die GLB mit ihrer Sitzung und
   übergibt sie als Base64 samt Georeferenz (`epsg;ox;oy;oz;lon;lat`).
-- `GlbReader`: Knoten, Transformationen, Dreiecksnetze, Linien (LINES,
-  LINE_STRIP), Materialnamen, Farbfaktor und Texturkennzeichen.
+- `GlbReader`: Knoten mit Pfad der Gruppenknoten, Transformationen,
+  Dreiecksnetze, Linien (LINES, LINE_STRIP), Punkte (POINTS) mit den Extras
+  des Knotens, Materialnamen, Farbfaktor und Texturkennzeichen.
 - `Importer`: Morph je Netz (`ACAPI_Body_*`, in `ACAPI_CallUndoableCommand`),
   Ebenen und Oberflächen (`API_MaterialID`) nach Materialname mit den
   Farben des Exports (Anzeigefarben, keine Linear-Umrechnung; texturierte
   Netze Grün-Grau), Polylinien (`API_PolyLineID`) aus Linien, Georeferenz
   über `ACAPI_GeoLocation_SetGeoLocation`. Achsen: X = x, Y = −z, Z = y.
+  „ALKIS Detail“ (Pfad `ALKIS_Detail/<Abschnitt>/…`) bekommt je Abschnitt eine
+  Ebene, Punkte werden Hotspots (`API_HotspotID`), Grenzpunkte zusätzlich ein
+  Text (`API_TextID`) mit der kurzen Punktnummer (`ShortPointNumber`: die
+  letzten fünf der 15 Stellen ohne führende Nullen). Die volle Punktkennung
+  bleibt nur im Export: `ACAPI_Element_ChangeElementInfoString` lehnt Hotspots
+  mit `APIERR_BADELEMENTTYPE` ab. Unter `Plan_2D` landet alles auf
+  Ebenen „gisloader 2D …“; Dreiecksnetze werden dort zu Schraffuren
+  (`API_HatchID`): Randkanten zu Ringen verkettet, Ringe nach Fläche sortiert,
+  gerade Verschachtelungstiefe = Außenring, ungerade = Loch. Darstellung je
+  Material (`HatchStyleFor`): Vollfläche (`APIFill_Solid`) mit RGB-Vordergrund
+  (`APIHatch_HasFgRGBColor`, Exportfarbe zu Weiß aufgehellt), Kontur und
+  Linien im nächstliegenden Stift der aktiven Palette (`ACAPI_Attribute_GetPen`),
+  Rechte mit `APIFill_Empty`; Anlegen nach Rang, weil später Angelegtes oben
+  liegt. Danach `ACAPI_View_Zoom` auf den Ausschnitt, wenn ein Grundriss vorne
+  liegt.
 - Serveradresse: `GisloaderServerUrl()` liest `~/.gisloader/archicad.json`
   (`{"server": …}`), sonst `GISLOADER_DEFAULT_SERVER`.
 - Protokoll: `~/Library/Logs/gisloader-archicad.log` bzw. `%TEMP%`.
@@ -86,6 +102,23 @@ curl -s -X POST http://127.0.0.1:19723 -H 'content-type: application/json' -d '{
 Antwort: `{"ok": true, "message": "254 Morph(s), 78 Polylinie(n) angelegt, 0 übersprungen, Ebenen: 5, Oberflächen: 6"}`.
 
 ## Stand
+
+- 7. November 2026, 0.1.15 (noch nicht veröffentlicht): Schraffuren im Lageplan
+     mit Kontur und Farbe je Abschnitt, Zeichenreihenfolge nach Rang, Linien im
+     Stift ihrer Farbe, Zoom auf den Ausschnitt. Sichtprüfung per Bildschirmfoto
+     mit dem Dom-Export (nur `Plan_2D`): 189 Schraffuren, 64 Polylinien, 522
+     Hotspots, 501 Nummern. 8. November: Grenzpunkte nur mit der kurzen
+     Punktnummer; geprüft mit 47 Grenzpunkten am Dom (14249 statt
+     322945628214249). Element-ID an Hotspots geht nicht (`APIERR_BADELEMENTTYPE`),
+     die volle Kennung bleibt im Export.
+
+- 6. November 2026, 0.1.15: ALKIS Detail und `Plan_2D` (siehe Aufbau). Mac-Build
+     mit Xcode 27.2; Zielversion macOS 12 statt 11, weil Xcode 27 11.0 nicht mehr
+     annimmt (Archicad 28 braucht ohnehin macOS 12). Test über `gisloader.ImportFile`
+     mit einem Export vom Münsterplatz Aachen in ein leeres Projekt aus der
+     INT-Vorlage: 625 Morphs, 16 Polylinien, 150 Schraffuren, 972 Hotspots,
+     952 Nummern, 0 übersprungen, 9 Ebenen. Die JSON-Schnittstelle von Archicad
+     zählt nur Modellelemente; Sichtprüfung im Grundriss steht in Schritt 5 aus.
 
 - 11. September 2026, 0.1.14: Windows-`.apx` war kein gültiges Add-on („weder ein
       Add-On noch Veraltetes“): `RFIX.win/gisloader.rc2` band die aus den `.grc`

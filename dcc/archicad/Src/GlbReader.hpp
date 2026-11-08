@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,7 @@ namespace gisloader {
 
 struct GlbMesh {
 	std::string nodeName;
+	std::vector<std::string> path;   // Namen der Gruppenknoten über dem Netz, z. B. {"ALKIS_Detail", "Grundstueck", "Grenzpunkte"}
 	std::string meshName;
 	std::string materialName;
 	double color[3] = {0.8, 0.8, 0.8};  // baseColorFactor (linear), 0..1
@@ -22,14 +24,26 @@ struct GlbMesh {
 /** Linienzüge (glTF LINES / LINE_STRIP), z. B. Flurstücksgrenzen und Höhenlinien. */
 struct GlbLine {
 	std::string nodeName;
+	std::vector<std::string> path;
 	std::string materialName;
 	double color[3] = {0.5, 0.5, 0.5};
 	std::vector<std::vector<double>> polylines;  // je Linienzug x,y,z,… (glTF-Achsen)
 };
 
+/** Punkte (glTF POINTS), z. B. Grenzpunkte und Einzelbäume aus „ALKIS Detail“, mit Attributen. */
+struct GlbPoints {
+	std::string nodeName;
+	std::vector<std::string> path;
+	std::string materialName;
+	double color[3] = {0.5, 0.5, 0.5};
+	std::vector<double> positions;                  // x,y,z je Punkt (glTF-Achsen)
+	std::map<std::string, std::string> attributes;  // Extras des Knotens als Text
+};
+
 struct GlbModel {
 	std::vector<GlbMesh> meshes;
 	std::vector<GlbLine> lines;
+	std::vector<GlbPoints> points;
 	std::string attribution;
 };
 

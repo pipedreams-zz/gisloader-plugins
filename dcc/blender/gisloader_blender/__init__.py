@@ -34,9 +34,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
+from mathutils import Matrix
 
 ADDON_ID = __package__ or __name__
-ADDON_VERSION = "0.1.15"
+ADDON_VERSION = "0.1.16"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Blender-Instanzen nehmen den ersten freien Port ab 47800 (bis +9); Cinema 4D ab 47810.
 BRIDGE_PORT_SPAN = 10
@@ -434,6 +435,35 @@ def _move_to_collection(objs, coll):
         coll.objects.link(o)
 
 
+def _points_to_empties(objs):
+    """
+    Einzelpunkte (glTF POINTS, z. B. Grenzpunkte und Einzelbäume aus „ALKIS Detail“) kommen
+    als Netz mit einem Vertex ohne Kanten. Blender zeigt solche Netze nur im Bearbeitungsmodus;
+    sie werden deshalb zu Empties an derselben Stelle, mit Namen, Eltern und Attributen.
+    """
+    n = 0
+    for o in list(objs):
+        if o.type != "MESH" or len(o.data.vertices) != 1 or len(o.data.edges) or len(o.data.polygons):
+            continue
+        e = bpy.data.objects.new(o.name, None)
+        e.empty_display_type = "SPHERE"
+        e.empty_display_size = 0.25
+        for c in o.users_collection:
+            c.objects.link(e)
+        e.parent = o.parent
+        e.matrix_world = Matrix.Translation(o.matrix_world @ o.data.vertices[0].co)
+        for k in o.keys():
+            e[k] = o[k]
+        mesh = o.data
+        name = o.name
+        bpy.data.objects.remove(o, do_unlink=True)
+        if mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+        e.name = name
+        n += 1
+    return n
+
+
 def _relink_textures(images, tex_dir):
     """Eingebettete (gepackte) Bilder als Dateien in tex/ ablegen und absolut verknüpfen."""
     os.makedirs(tex_dir, exist_ok=True)
@@ -490,6 +520,7 @@ def import_export(context, export_id, report, folder=None):
         bpy.ops.import_scene.gltf(filepath=path)
         new = [o for o in bpy.data.objects if o.name not in before]
         _move_to_collection(new, coll)
+        _points_to_empties(new)
     relinked = _relink_textures(
         [i for i in bpy.data.images if i.name not in images_before], os.path.join(folder, "tex")
     )

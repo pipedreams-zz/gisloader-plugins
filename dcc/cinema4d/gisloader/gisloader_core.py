@@ -34,7 +34,7 @@ try:
 except ImportError:  # pragma: no cover – alte Versionen ohne Node-API
     maxon = None
 
-VERSION = "0.1.15"
+VERSION = "0.1.16"
 DEFAULT_SERVER = "https://gisloader.ampsrvr.xyz"
 # Cinema 4D nimmt den ersten freien Port ab 47810 (bis +9); Blender liegt ab 47800.
 BRIDGE_PORT = 47810
@@ -719,6 +719,177 @@ def import_obj(doc, path):
                 bc[k] = v
 
 
+# ── ALKIS Detail und Plan_2D: Gruppen, Attribute, Punkte ───────────────
+
+GROUP_ROOTS = ("ALKIS_Detail", "Plan_2D")
+
+# Meter je Dokumenteinheit
+_UNIT_M = {
+    c4d.DOCUMENT_UNIT_KM: 1000.0,
+    c4d.DOCUMENT_UNIT_M: 1.0,
+    c4d.DOCUMENT_UNIT_CM: 0.01,
+    c4d.DOCUMENT_UNIT_MM: 0.001,
+    c4d.DOCUMENT_UNIT_MICRO: 1e-6,
+    c4d.DOCUMENT_UNIT_NM: 1e-9,
+    c4d.DOCUMENT_UNIT_MILE: 1609.344,
+    c4d.DOCUMENT_UNIT_YARD: 0.9144,
+    c4d.DOCUMENT_UNIT_FOOT: 0.3048,
+    c4d.DOCUMENT_UNIT_INCH: 0.0254,
+}
+
+
+def _doc_units_per_meter(doc):
+    usd = doc[c4d.DOCUMENT_DOCUNIT]
+    if usd is None:
+        return 100.0
+    scale, unit = usd.GetUnitScale()
+    return 1.0 / (scale * _UNIT_M.get(unit, 0.01))
+
+
+def _glb_json(path):
+    with open(path, "rb") as f:
+        magic, _version, _length = struct.unpack("<III", f.read(12))
+        if magic != 0x46546C67:
+            return {}
+        chunk_len, chunk_type = struct.unpack("<II", f.read(8))
+        if chunk_type != 0x4E4F534A:
+            return {}
+        return json.loads(f.read(chunk_len).decode("utf-8"))
+
+
+def _safe_node_name(name):
+    """Wie safeNodeName im Exporter: großer Zahlenanhang nach Punkt wird zu „_“."""
+    m = re.match(r"^(.*)\.(\d+)$", name)
+    if not m:
+        return name
+    digits = m.group(2)
+    return f"{m.group(1)}_{digits}" if len(digits) > 10 or int(digits) > 2147483647 else name
+
+
+def obj_name_index(glb_path):
+    """
+    Knoten mit Netz unter ALKIS_Detail oder Plan_2D, nach dem Objektnamen, den der
+    Exporter in die OBJ schreibt (Pfad und Name mit „_“ verbunden). Wert: (Pfad der
+    Gruppen, Knotenname, Extras, ob Punkte).
+    """
+    gltf = _glb_json(glb_path)
+    nodes = gltf.get("nodes", [])
+    meshes = gltf.get("meshes", [])
+    parent = {}
+    for i, n in enumerate(nodes):
+        for c in n.get("children", []):
+            parent[c] = i
+    index = {}
+    for i, n in enumerate(nodes):
+        if "mesh" not in n:
+            continue
+        path = []
+        j = parent.get(i)
+        while j is not None:
+            path.insert(0, nodes[j].get("name", ""))
+            j = parent.get(j)
+        if not path or path[0] not in GROUP_ROOTS:
+            continue
+        name = n.get("name", "")
+        raw = re.sub(r"[^\w.-]+", "_", "_".join(_safe_node_name(x) for x in path + [name]), flags=re.ASCII)
+        prims = meshes[n["mesh"]].get("primitives", []) if n["mesh"] < len(meshes) else []
+        points = bool(prims) and all(pr.get("mode", 4) == 0 for pr in prims)
+        index.setdefault(raw, (path, name, n.get("extras") or {}, points))
+    return index
+
+
+def obj_point_positions(obj_path):
+    """Vertices der Objekte mit „p“-Zeilen der OBJ (Dateikoordinaten), nach Objektname."""
+    out = {}
+    name, verts, has_p = None, [], False
+
+    def flush():
+        if name is not None and has_p:
+            out[name] = list(verts)
+
+    with open(obj_path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if line.startswith("o "):
+                flush()
+                name, verts, has_p = line[2:].strip(), [], False
+            elif line.startswith("v "):
+                parts = line.split()
+                verts.append((float(parts[1]), float(parts[2]), float(parts[3])))
+            elif line.startswith("p "):
+                has_p = True
+    flush()
+    return out
+
+
+def organize_groups(doc, root, glb_path, obj_path):
+    """
+    Ordnet die OBJ-Objekte von ALKIS Detail und Plan_2D in Null-Objekte nach Pfad
+    (Plan_2D › ALKIS_Detail › Abschnitt › Objektart), benennt sie nach dem Knoten
+    (gml:id), hängt die Attribute aus den GLB-Extras als User Data an und ersetzt
+    Punktobjekte (Grenzpunkte, Einzelbäume; der OBJ-Importer liefert sie leer)
+    durch Null-Objekte an der Punktlage. Liefert (Objekte, Punkte).
+    """
+    index = obj_name_index(glb_path)
+    if not index:
+        return 0, 0
+    positions = obj_point_positions(obj_path)
+    swap = obj_up_axis(obj_path) == "Z"
+    k = _doc_units_per_meter(doc)
+    groups = {}
+
+    def group_for(path):
+        key = tuple(path)
+        if key in groups:
+            return groups[key]
+        parent = group_for(path[:-1]) if len(path) > 1 else root
+        g = c4d.BaseObject(c4d.Onull)
+        g.SetName(path[-1])
+        g.InsertUnderLast(parent)
+        doc.AddUndo(c4d.UNDOTYPE_NEW, g)
+        groups[key] = g
+        return g
+
+    children = []
+    c = root.GetDown()
+    while c:
+        children.append(c)
+        c = c.GetNext()
+    moved = points = 0
+    for o in children:
+        raw = o.GetName()
+        hit = index.get(raw)
+        if hit is None:
+            base = re.sub(r"_\d+$", "", raw)
+            hit = index.get(base)
+            if hit is None:
+                continue
+        path, name, extras, is_points = hit
+        target = group_for(path)
+        if is_points and raw in positions:
+            for x, y, z in positions[raw]:
+                n = c4d.BaseObject(c4d.Onull)
+                n.SetName(name)
+                n[c4d.NULLOBJECT_DISPLAY] = c4d.NULLOBJECT_DISPLAY_POINT
+                v = c4d.Vector(x, z, y) if swap else c4d.Vector(x, y, z)
+                n.SetAbsPos(v * k)
+                for key, val in extras.items():
+                    _add_userdata(n, str(key), val if isinstance(val, (int, float)) and not isinstance(val, bool) else str(val))
+                n.InsertUnderLast(target)
+                doc.AddUndo(c4d.UNDOTYPE_NEW, n)
+                points += 1
+            doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, o)
+            o.Remove()
+            continue
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE, o)
+        o.Remove()
+        o.SetName(name)
+        for key, val in extras.items():
+            _add_userdata(o, str(key), val if isinstance(val, (int, float)) and not isinstance(val, bool) else str(val))
+        o.InsertUnderLast(target)
+        moved += 1
+    return moved, points
+
+
 def _reparent_new(doc, before, root):
     """Neue Objekte auf oberster Ebene unter root hängen; eine Hülle des OBJ-Importers auflösen."""
     new = [o for o in doc.GetObjects() if o.GetGUID() not in before and o is not root]
@@ -801,6 +972,16 @@ def import_export(doc, p, export_id, folder=None):
         search.append(os.path.join(folder, os.path.splitext(g)[0]))
         search.append(os.path.join(folder, os.path.splitext(g)[0] + "_tex"))
     relinked = relink_textures(doc, new_mats, folder, [d for d in search if d])
+    model_glb = next((g for g in glbs if g.endswith("_model.glb")), glbs[0] if glbs else None)
+    if use_obj and model_glb:
+        try:
+            moved, pts = organize_groups(doc, root, os.path.join(folder, model_glb), os.path.join(folder, objs[0]))
+            if moved or pts:
+                log(f"ALKIS Detail/Plan_2D: {moved} Objekte gruppiert, {pts} Punkte als Null-Objekte")
+        except Exception as e:
+            import traceback
+
+            log("Gruppierung ALKIS Detail fehlgeschlagen: " + repr(e) + "\n" + traceback.format_exc())
     log(f"{imported} Objekte aus {'OBJ' if use_obj else 'GLB'}, {relinked} Textur(en) verknüpft unter {os.path.join(folder, 'tex')}")
     if p.get("corona") and corona_available():
         try:

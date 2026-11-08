@@ -2,6 +2,7 @@
 
 #include <climits>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -115,7 +116,7 @@ GlbModel ReadGlb (const std::vector<uint8_t>& bytes)
 	GlbModel model;
 	model.attribution = gltf["scenes"][0]["extras"]["attribution"].StringOr (gltf["asset"]["copyright"].StringOr (""));
 
-	std::function<void (long, const Mat4&, const std::string&)> visit = [&] (long nodeIndex, const Mat4& parent, const std::string& parentName) {
+	std::function<void (long, const Mat4&, const std::string&, const std::vector<std::string>&)> visit = [&] (long nodeIndex, const Mat4& parent, const std::string& parentName, const std::vector<std::string>& path) {
 		const JsonValue& node = gltf["nodes"][static_cast<size_t> (nodeIndex)];
 		if (node.IsNull ()) return;
 		const Mat4 world = parent * NodeMatrix (node);
@@ -125,7 +126,7 @@ GlbModel ReadGlb (const std::vector<uint8_t>& bytes)
 			for (size_t p = 0; p < mesh["primitives"].Size (); ++p) {
 				const JsonValue& prim = mesh["primitives"][p];
 				const long mode = prim["mode"].IntOr (4);
-				if (mode != 4 && mode != 1 && mode != 3) continue;  // Dreiecke, LINES, LINE_STRIP
+				if (mode != 4 && mode != 1 && mode != 3 && mode != 0) continue;  // Dreiecke, LINES, LINE_STRIP, POINTS
 				if (!prim["attributes"].Has ("POSITION") || bin == nullptr) continue;
 				const JsonValue& mat = gltf["materials"][static_cast<size_t> (prim["material"].IntOr (-1))];
 				const std::string materialName = mat["name"].StringOr ("");
@@ -158,9 +159,34 @@ GlbModel ReadGlb (const std::vector<uint8_t>& bytes)
 					indices.resize (pos.count);
 					for (size_t i = 0; i < pos.count; ++i) indices[i] = static_cast<uint32_t> (i);
 				}
+				if (mode == 0) {
+					GlbPoints out;
+					out.nodeName = name;
+					out.path = path;
+					out.materialName = materialName;
+					std::memcpy (out.color, color, sizeof color);
+					for (uint32_t i : indices) {
+						if (i >= pos.count) continue;
+						out.positions.insert (out.positions.end (), {positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]});
+					}
+					if (node["extras"].IsObject ()) {
+						for (const auto& kv : node["extras"].obj) {
+							const JsonValue& v = kv.second;
+							if (v.type == JsonValue::Type::String) out.attributes[kv.first] = v.str;
+							else if (v.type == JsonValue::Type::Number) {
+								char buf[64];
+								std::snprintf (buf, sizeof buf, "%.15g", v.num);
+								out.attributes[kv.first] = buf;
+							} else if (v.type == JsonValue::Type::Bool) out.attributes[kv.first] = v.b ? "true" : "false";
+						}
+					}
+					if (!out.positions.empty ()) model.points.push_back (std::move (out));
+					continue;
+				}
 				if (mode == 4) {
 					GlbMesh out;
 					out.nodeName = name;
+					out.path = path;
 					out.meshName = mesh["name"].StringOr (name);
 					out.materialName = materialName;
 					std::memcpy (out.color, color, sizeof color);
@@ -174,6 +200,7 @@ GlbModel ReadGlb (const std::vector<uint8_t>& bytes)
 				// Linien: Segmente zu Linienzügen verketten (LINES) bzw. direkt übernehmen (LINE_STRIP).
 				GlbLine line;
 				line.nodeName = name;
+				line.path = path;
 				line.materialName = materialName;
 				std::memcpy (line.color, color, sizeof color);
 				auto point = [&] (uint32_t i) { return std::vector<double> {positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]}; };
@@ -199,15 +226,17 @@ GlbModel ReadGlb (const std::vector<uint8_t>& bytes)
 				if (!line.polylines.empty ()) model.lines.push_back (std::move (line));
 			}
 		}
+		std::vector<std::string> childPath = path;
+		childPath.push_back (node["name"].StringOr (""));
 		for (size_t c = 0; c < node["children"].Size (); ++c)
-			visit (node["children"][c].IntOr (-1), world, name);
+			visit (node["children"][c].IntOr (-1), world, name, childPath);
 	};
 
 	const JsonValue& scene = gltf["scenes"][static_cast<size_t> (gltf["scene"].IntOr (0))];
 	if (scene.IsNull ()) {
-		for (size_t n = 0; n < gltf["nodes"].Size (); ++n) visit (static_cast<long> (n), Mat4::Identity (), "");
+		for (size_t n = 0; n < gltf["nodes"].Size (); ++n) visit (static_cast<long> (n), Mat4::Identity (), "", {});
 	} else {
-		for (size_t n = 0; n < scene["nodes"].Size (); ++n) visit (scene["nodes"][n].IntOr (-1), Mat4::Identity (), "");
+		for (size_t n = 0; n < scene["nodes"].Size (); ++n) visit (scene["nodes"][n].IntOr (-1), Mat4::Identity (), "", {});
 	}
 	return model;
 }

@@ -19,9 +19,13 @@ der Web-App.
 | Rhino 8   | `dcc/rhino`    | Rhino 8 (Python 3), Paket `.yak`            | 47820–47829 |
 | Archicad  | `dcc/archicad` | Archicad 28 (macOS, Windows)                | Palette     |
 
+Die Zips heißen `gisloader_<plugin>-<zielprogramm>_v<version>_<datum>.zip`,
+etwa `gisloader_archicad-28_v0.1.15_2026-11-08.zip` für Archicad 28.
+
 Jedes Plugin zählt seine Version eigenständig; Releases tragen ein Datum und
-nennen die enthaltenen Versionen, Änderungen stehen in
-[docs/CHANGELOG.md](docs/CHANGELOG.md).
+nennen die enthaltenen Versionen. Jede Plugin-Version hat einen Tag
+`<plugin>-v<version>` (etwa `blender-v0.1.16`) auf dem ersten Release, das sie
+enthält. Änderungen stehen in [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ## Anleitungen
 

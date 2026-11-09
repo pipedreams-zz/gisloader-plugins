@@ -1,0 +1,9 @@
+{
+  "date": "2026-11-08",
+  "plugins": {
+    "blender": { "target": "3.6+" },
+    "cinema4d": { "target": "2025-2026" },
+    "rhino": { "target": "8" },
+    "archicad": { "target": "28" }
+  }
+}

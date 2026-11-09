@@ -1,7 +1,10 @@
 name: Release
 
 # Bei einem Tag (Datum wie 2026.09.09 oder v<x>) alle Plugins packen und als
-# Release anhängen; die Notiz nennt die Version jedes Plugins.
+# Release anhängen; die Notiz nennt die Version jedes Plugins. Die Zips heißen
+# gisloader_<plugin>-<zielprogramm>_v<version>_<datum>.zip (dcc/release.json).
+# Danach bekommt jede neue Plugin-Version den Tag <plugin>-v<version>; ein Lauf
+# per Hand (workflow_dispatch) trägt fehlende Versionstags nach, ohne Release.
 on:
   push:
     tags: ["v*", "20*"]
@@ -15,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - run: bash scripts/pack.sh
       - name: Release anlegen
         if: startsWith(github.ref, 'refs/tags/')
@@ -25,3 +30,9 @@ jobs:
             --title "gisloader-Plugins $GITHUB_REF_NAME" \
             --notes-file dist/RELEASE.md \
             dist/*.zip dist/*.yak
+      - name: Versionstags
+        run: |
+          git config user.name "gisloader-ci"
+          git config user.email "ci@ampsrvr.xyz"
+          git fetch --tags --force
+          bash scripts/version-tags.sh --push

@@ -1,30 +1,45 @@
 #!/usr/bin/env bash
 # Packt alle Plugins als Zips nach dist/ (gleiche Ordnerstruktur wie die Web-App)
 # und schreibt dist/RELEASE.md mit der Version jedes Plugins.
+# Dateiname: gisloader_<plugin>-<zielprogramm>_v<version>_<releasedatum>.zip,
+# Zielprogramm und Releasedatum aus dcc/release.json.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p dist
 rm -f dist/*.zip dist/*.yak dist/RELEASE.md
-(cd dcc/blender && zip -qr ../../dist/gisloader-blender.zip gisloader_blender -x '*/__pycache__/*')
-(cd dcc/cinema4d && zip -qr ../../dist/gisloader-cinema4d.zip gisloader -x '*/__pycache__/*')
-(cd dcc && zip -qr ../dist/gisloader-rhino.zip rhino -x '*/__pycache__/*' 'rhino/build/*' 'rhino/gisloader.rhproj')
+
+# shellcheck source=versions.sh
+source scripts/versions.sh
+DATE=$(python3 -c 'import json; print(json.load(open("dcc/release.json"))["date"])')
+target () { python3 -c 'import json,sys; print(json.load(open("dcc/release.json"))["plugins"][sys.argv[1]]["target"])' "$1"; }
+name () { echo "gisloader_$1-$(target "$1")_v$2_${DATE}.zip"; }
+
+BLENDER=$(plugin_version - blender)
+C4D=$(plugin_version - cinema4d)
+RHINO=$(plugin_version - rhino)
+ARCHICAD=$(plugin_version - archicad)
+F_BLENDER=$(name blender "$BLENDER")
+F_C4D=$(name cinema4d "$C4D")
+F_RHINO=$(name rhino "$RHINO")
+F_ARCHICAD=$(name archicad "$ARCHICAD")
+
+(cd dcc/blender && zip -qr "../../dist/$F_BLENDER" gisloader_blender -x '*/__pycache__/*')
+(cd dcc/cinema4d && zip -qr "../../dist/$F_C4D" gisloader -x '*/__pycache__/*')
+(cd dcc && zip -qr "../dist/$F_RHINO" rhino -x '*/__pycache__/*' 'rhino/build/*' 'rhino/gisloader.rhproj')
 cp dcc/rhino/dist/*.yak dist/ 2>/dev/null || true
-if [ -d dcc/archicad/dist ]; then (cd dcc/archicad/dist && zip -qr ../../../dist/gisloader-archicad.zip .); fi
+if [ -d dcc/archicad/dist ]; then (cd dcc/archicad/dist && zip -qr "../../../dist/$F_ARCHICAD" .); fi
 
-ver () { grep -oE "$2" "$1" | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "?"; }
-BLENDER=$(ver dcc/blender/gisloader_blender/__init__.py 'ADDON_VERSION = "[^"]+"')
-C4D=$(ver dcc/cinema4d/gisloader/gisloader_core.py 'VERSION = "[^"]+"')
-RHINO=$(ver dcc/rhino/lib/gisloader_rhino/__init__.py 'VERSION = "[^"]+"')
-ARCHICAD=$(ver dcc/archicad/Src/Version.hpp 'GISLOADER_ADDON_VERSION "[^"]+"')
 cat > dist/RELEASE.md <<EOF
-| Plugin | Version | Datei |
-| --- | --- | --- |
-| Blender | $BLENDER | gisloader-blender.zip |
-| Cinema 4D | $C4D | gisloader-cinema4d.zip |
-| Rhino 8 | $RHINO | gisloader-rhino.zip, gisloader-$RHINO+*.yak |
-| Archicad 28 | $ARCHICAD | gisloader-archicad.zip (macOS-Bundle und Windows-.apx) |
+Release vom ${DATE}.
 
-Jedes Plugin zählt seine Version eigenständig; was sich geändert hat, steht in [docs/CHANGELOG.md](docs/CHANGELOG.md). Anleitungen unter docs/.
+| Plugin | Version | Tag | Datei |
+| --- | --- | --- | --- |
+| Blender | $BLENDER | blender-v$BLENDER | $F_BLENDER |
+| Cinema 4D | $C4D | cinema4d-v$C4D | $F_C4D |
+| Rhino 8 | $RHINO | rhino-v$RHINO | $F_RHINO, gisloader-$RHINO+*.yak |
+| Archicad 28 | $ARCHICAD | archicad-v$ARCHICAD | $F_ARCHICAD (macOS-Bundle und Windows-.apx) |
+
+Jedes Plugin zählt seine Version eigenständig; der Tag \`<plugin>-v<version>\` zeigt auf das erste Release mit dieser Version. Was sich geändert hat, steht in [docs/CHANGELOG.md](docs/CHANGELOG.md). Anleitungen unter docs/.
 EOF
 ls -l dist
 cat dist/RELEASE.md

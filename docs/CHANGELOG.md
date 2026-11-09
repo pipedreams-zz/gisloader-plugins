@@ -2,7 +2,9 @@
 
 Jedes Plugin zählt seine Version eigenständig und wird nur hochgezählt, wenn
 sich sein Code ändert. Releases im Plugin-Repo tragen ein Datum und nennen
-die enthaltenen Plugin-Versionen.
+die enthaltenen Plugin-Versionen; jede Version hat dort den Tag
+`<plugin>-v<version>`. Die Zips heißen nach Plugin, Zielprogramm, Version und
+Releasedatum, etwa `gisloader_archicad-28_v0.1.15_2026-11-08.zip`.
 
 ## 6. November 2026
 

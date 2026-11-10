@@ -28,6 +28,11 @@ Georeferenz des Ausschnitts.
   Archicad-Oberflächen die Luftbildtextur nicht übernehmen. Bestehende
   Oberflächen gleichen Namens bleiben unverändert, eigene Farbanpassungen
   gehen bei weiteren Importen also nicht verloren.
+- LoD3 Hamburg mit Fassadentexturen: Archicad übernimmt die Bilder nicht. Jedes
+  Fassadenbild ist im Export ein eigenes Material (`fassade-<Gebäude-ID>`), daraus
+  wird je Gebäude eine Oberfläche „gisloader fassade-…“ im Grün-Grau der
+  texturierten Flächen statt „gisloader Dach“/„gisloader Wand“. Für Archicad
+  deshalb LoD3 ohne Fassadentexturen exportieren (Vorgabe im Panel).
 - Flurstücksgrenzen und Höhenlinien als Polylinien im Grundriss.
 - „ALKIS Detail“ (NRW) auf je einer Ebene pro Abschnitt, etwa „gisloader ALKIS
   Gebäudedetail“ oder „gisloader ALKIS Grundstück“: Flächen als Morphs, Linien

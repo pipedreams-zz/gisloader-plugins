@@ -50,7 +50,9 @@ Punktlage, weil Blender reine Punktnetze nur im Bearbeitungsmodus zeigt.
 - Eingebettete Texturen der GLB werden nach dem Import als Dateien unter
   `tex/` im Exportordner abgelegt und absolut verknüpft, damit sie beim
   Speichern der Blend-Datei und in Renderfarmen als Dateien vorliegen; der
-  Pfad steht auch in `gisloader_folder` an der Collection.
+  Pfad steht auch in `gisloader_folder` an der Collection. Das gilt auch für
+  die Fassadentexturen von LoD3 Hamburg (ein Material und ein Bild je Gebäude,
+  `fassade-<Gebäude-ID>`).
 
 ### Georeferenz
 

@@ -66,7 +66,10 @@ Einzelbäume sind Punkte.
 Rhino bettet Bilder aus glTF in das Dokument ein. Die Geländetextur liegt
 zusätzlich als JPEG im Exportordner; das Plugin kopiert sie nach `tex/` und
 setzt sie als Bitmap-Textur des Materials „terrain“ mit absolutem Pfad. Die
-Texturen des photorealistischen Meshes bleiben eingebettet.
+Texturen des photorealistischen Meshes bleiben eingebettet. Fassadentexturen von
+LoD3 Hamburg (Materialien `fassade-<Gebäude-ID>`) kommen eingebettet an; liegen sie
+als Dateien im Export (mit OBJ), verknüpft das Plugin sie wie die Geländetextur
+unter `tex/`. Die Bauteilebenen (Dach, Wand) folgen dem Objektnamen.
 
 ### Störungen
 
